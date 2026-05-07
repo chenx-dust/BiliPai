@@ -19,7 +19,6 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 //  Cupertino Icons - iOS SF Symbols 风格图标
 import io.github.alexzhirkevich.cupertino.icons.CupertinoIcons
 import io.github.alexzhirkevich.cupertino.icons.outlined.*
-import io.github.alexzhirkevich.cupertino.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.input.pointer.pointerInput
@@ -28,7 +27,6 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.composed
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Shape
@@ -53,13 +51,10 @@ import com.android.purebilibili.core.util.HapticType
 import com.android.purebilibili.core.util.iOSTapEffect
 import com.android.purebilibili.core.util.rememberHapticFeedback
 import com.android.purebilibili.feature.home.UserState
-import com.android.purebilibili.core.theme.iOSSystemGray
 import com.android.purebilibili.core.store.LiquidGlassStyle
 import dev.chrisbanes.haze.HazeState
 import com.android.purebilibili.core.ui.blur.shouldAllowDirectHazeLiquidGlassFallback
 import com.android.purebilibili.core.ui.blur.shouldAllowHomeChromeLiquidGlass
-import com.android.purebilibili.core.ui.blur.resolveUnifiedBlurredEdgeTreatment
-import com.android.purebilibili.core.ui.blur.unifiedBlur
 import com.android.purebilibili.core.ui.blur.BlurStyles
 import com.android.purebilibili.core.ui.blur.BlurIntensity
 import com.android.purebilibili.core.ui.blur.currentUnifiedBlurIntensity
@@ -281,18 +276,18 @@ internal fun resolveHomeTopSearchRevealDeadZone(
     }
 }
 
-internal fun resolveHomeTopVisibleSearchHeightPx(
-    rawSearchHeightPx: Float,
-    fullSearchHeightPx: Float,
+internal fun resolveHomeTopVisibleHeaderHeightPx(
+    rawHeaderHeightPx: Float,
+    fullHeaderHeightPx: Float,
     revealDeadZonePx: Float
 ): Float {
-    if (fullSearchHeightPx <= 0f) return 0f
-    val clampedRawHeight = rawSearchHeightPx.coerceIn(0f, fullSearchHeightPx)
-    val clampedDeadZone = revealDeadZonePx.coerceIn(0f, fullSearchHeightPx - 0.5f)
+    if (fullHeaderHeightPx <= 0f) return 0f
+    val clampedRawHeight = rawHeaderHeightPx.coerceIn(0f, fullHeaderHeightPx)
+    val clampedDeadZone = revealDeadZonePx.coerceIn(0f, fullHeaderHeightPx - 0.5f)
     if (clampedDeadZone <= 0f) return clampedRawHeight
     if (clampedRawHeight <= clampedDeadZone) return 0f
-    val normalizedFraction = (clampedRawHeight - clampedDeadZone) / (fullSearchHeightPx - clampedDeadZone)
-    return (normalizedFraction * fullSearchHeightPx).coerceIn(0f, fullSearchHeightPx)
+    val normalizedFraction = (clampedRawHeight - clampedDeadZone) / (fullHeaderHeightPx - clampedDeadZone)
+    return (normalizedFraction * fullHeaderHeightPx).coerceIn(0f, fullHeaderHeightPx)
 }
 
 internal fun usesImmediateHomeTopSearchReveal(
@@ -322,7 +317,7 @@ internal fun resolveHomeTopSearchContentTranslationYPx(
 internal fun resolveHomeHeaderScrollLayout(
     headerOffsetPx: Float,
     searchBarHeightPx: Float,
-    searchCollapseDistancePx: Float,
+    headerCollapseDistancePx: Float,
     tabRowHeightPx: Float,
     isHeaderCollapseEnabled: Boolean,
     searchRevealDeadZonePx: Float = 0f,
@@ -336,18 +331,19 @@ internal fun resolveHomeHeaderScrollLayout(
             tabAlpha = 1f
         )
     }
-    val effectiveCollapseDistancePx = searchCollapseDistancePx.coerceAtLeast(searchBarHeightPx)
+    val effectiveCollapseDistancePx = headerCollapseDistancePx.coerceAtLeast(searchBarHeightPx)
     val clampedOffsetPx = headerOffsetPx.coerceIn(-effectiveCollapseDistancePx, 0f)
-    val currentSearchHeightPx = resolveHomeTopVisibleSearchHeightPx(
-        rawSearchHeightPx = searchBarHeightPx + clampedOffsetPx,
-        fullSearchHeightPx = searchBarHeightPx,
+    val currentHeaderHeightPx = resolveHomeTopVisibleHeaderHeightPx(
+        rawHeaderHeightPx = effectiveCollapseDistancePx + clampedOffsetPx,
+        fullHeaderHeightPx = effectiveCollapseDistancePx,
         revealDeadZonePx = searchRevealDeadZonePx
     )
-    val rawSearchRevealFraction = if (searchBarHeightPx > 0f) {
-        (currentSearchHeightPx / searchBarHeightPx).coerceIn(0f, 1f)
+    val rawSearchRevealFraction = if (effectiveCollapseDistancePx > 0f) {
+        (currentHeaderHeightPx / effectiveCollapseDistancePx).coerceIn(0f, 1f)
     } else {
         0f
     }
+    val currentSearchHeightPx = rawSearchRevealFraction * searchBarHeightPx
     val searchAlpha = resolveHomeTopSearchContentRevealFraction(
         searchRevealFraction = rawSearchRevealFraction,
         usesImmediateReveal = usesImmediateSearchReveal
@@ -573,12 +569,13 @@ internal fun resolveHomeTopSearchCollapseExtraSpacing(uiPreset: UiPreset = UiPre
     }
 }
 
-internal fun resolveHomeTopSearchCollapseDistance(
+internal fun resolveHomeHeaderCollapseDistance(
     searchBarHeight: Dp,
+    tabRowHeight: Dp,
     uiPreset: UiPreset = UiPreset.IOS,
     androidNativeVariant: AndroidNativeVariant = AndroidNativeVariant.MATERIAL3
 ): Dp {
-    return searchBarHeight +
+    return searchBarHeight + tabRowHeight +
         resolveHomeTopSearchToTabsSpacing(uiPreset, androidNativeVariant) +
         resolveHomeTopSearchCollapseExtraSpacing(uiPreset)
 }
@@ -1440,21 +1437,22 @@ fun iOSHomeHeader(
         labelMode = homeSettings?.topTabLabelMode
             ?: com.android.purebilibili.core.store.SettingsManager.TopTabLabelMode.TEXT_ONLY
     )
-    val searchCollapseDistanceDp = resolveHomeTopSearchCollapseDistance(
+    val headerCollapseDistanceDp = resolveHomeHeaderCollapseDistance(
         searchBarHeight = searchBarHeightDp,
+        tabRowHeight = tabRowHeightDp,
         uiPreset = uiPreset,
         androidNativeVariant = androidNativeVariant
     )
     val searchRevealDeadZoneDp = resolveHomeTopSearchRevealDeadZone(uiPreset, androidNativeVariant)
     val searchBarHeightPx = with(density) { searchBarHeightDp.toPx() }
-    val searchCollapseDistancePx = with(density) { searchCollapseDistanceDp.toPx() }
     val searchRevealDeadZonePx = with(density) { searchRevealDeadZoneDp.toPx() }
     val tabRowHeightPx = with(density) { tabRowHeightDp.toPx() }
+    val headerCollapseDistancePx = with(density) { headerCollapseDistanceDp.toPx() }
 
     val scrollLayout = remember(
         headerOffset,
         searchBarHeightPx,
-        searchCollapseDistancePx,
+        headerCollapseDistancePx,
         searchRevealDeadZonePx,
         tabRowHeightPx,
         isHeaderCollapseEnabled
@@ -1462,7 +1460,7 @@ fun iOSHomeHeader(
         resolveHomeHeaderScrollLayout(
             headerOffsetPx = headerOffset,
             searchBarHeightPx = searchBarHeightPx,
-            searchCollapseDistancePx = searchCollapseDistancePx,
+            headerCollapseDistancePx = headerCollapseDistancePx,
             tabRowHeightPx = tabRowHeightPx,
             isHeaderCollapseEnabled = isHeaderCollapseEnabled,
             searchRevealDeadZonePx = searchRevealDeadZonePx,
@@ -1472,15 +1470,6 @@ fun iOSHomeHeader(
     val currentSearchHeight = with(density) { scrollLayout.searchBarHeightPx.toDp() }
     val searchAlpha = scrollLayout.searchAlpha
     val expandedTabHeight = with(density) { scrollLayout.tabRowHeightPx.toDp() }
-    val currentTabHeight by animateDpAsState(
-        targetValue = resolveHomeTopTabPresentationHeight(
-            expandedHeight = expandedTabHeight,
-            isCollapsed = topTabsVisible && topTabsCollapsed,
-            collapsedHandleHeight = if (isHeaderCollapseEnabled) 0.dp else resolveHomeTopCollapsedHandleHeight()
-        ),
-        animationSpec = tween(durationMillis = 180),
-        label = "currentTabHeight"
-    )
     val tabAlpha = scrollLayout.tabAlpha
     val searchRevealFraction = if (searchBarHeightPx > 0f) {
         (scrollLayout.searchBarHeightPx / searchBarHeightPx).coerceIn(0f, 1f)
@@ -1510,6 +1499,25 @@ fun iOSHomeHeader(
             searchRevealFraction = searchRevealFraction,
             usesImmediateReveal = usesImmediateSearchReveal
         )
+    }
+    val autoTopTabsRevealFraction = if (topTabsVisible) {
+        searchRevealFraction
+    } else {
+        0f
+    }
+    val currentTabHeight = if (isHeaderCollapseEnabled) {
+        expandedTabHeight * autoTopTabsRevealFraction
+    } else {
+        val animatedTabHeight by animateDpAsState(
+            targetValue = resolveHomeTopTabPresentationHeight(
+                expandedHeight = expandedTabHeight,
+                isCollapsed = topTabsVisible && topTabsCollapsed,
+                collapsedHandleHeight = resolveHomeTopCollapsedHandleHeight()
+            ),
+            animationSpec = tween(durationMillis = 180),
+            label = "currentTabHeight"
+        )
+        animatedTabHeight
     }
     val searchContentTranslationYPx = remember(
         searchRevealFraction,
@@ -1576,11 +1584,16 @@ fun iOSHomeHeader(
         isTabFloating = isTabFloating,
         containerAlpha = tabChromeColors.containerColor.alpha
     )
-    val tabContentAlpha by animateFloatAsState(
-        targetValue = if (topTabsVisible && !topTabsCollapsed) 1f else 0f,
-        animationSpec = tween(durationMillis = 180),
-        label = "tabContentAlpha"
-    )
+    val tabContentAlpha = if (isHeaderCollapseEnabled) {
+        if (topTabsVisible) searchContentRevealFraction else 0f
+    } else {
+        val animatedTabContentAlpha by animateFloatAsState(
+            targetValue = if (topTabsVisible && !topTabsCollapsed) 1f else 0f,
+            animationSpec = tween(durationMillis = 180),
+            label = "tabContentAlpha"
+        )
+        animatedTabContentAlpha
+    }
     val effectiveContinuousSlabRenderMode = if (integratedCollapsedTopBar) {
         topPanelChromeRenderMode
     } else {

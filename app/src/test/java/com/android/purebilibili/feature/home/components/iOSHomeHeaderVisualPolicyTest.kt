@@ -3,7 +3,6 @@ package com.android.purebilibili.feature.home.components
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.CornerBasedShape
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.ui.graphics.Shape
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.RectangleShape
@@ -205,7 +204,7 @@ class iOSHomeHeaderVisualPolicyTest {
         val layout = resolveHomeHeaderScrollLayout(
             headerOffsetPx = -96f,
             searchBarHeightPx = 48f,
-            searchCollapseDistancePx = 54f,
+            headerCollapseDistancePx = 54f,
             tabRowHeightPx = 56f,
             isHeaderCollapseEnabled = true
         )
@@ -221,7 +220,7 @@ class iOSHomeHeaderVisualPolicyTest {
         val layout = resolveHomeHeaderScrollLayout(
             headerOffsetPx = -24f,
             searchBarHeightPx = 48f,
-            searchCollapseDistancePx = 54f,
+            headerCollapseDistancePx = 54f,
             tabRowHeightPx = 56f,
             isHeaderCollapseEnabled = true
         )
@@ -237,7 +236,7 @@ class iOSHomeHeaderVisualPolicyTest {
         val layout = resolveHomeHeaderScrollLayout(
             headerOffsetPx = -44f,
             searchBarHeightPx = 48f,
-            searchCollapseDistancePx = 54f,
+            headerCollapseDistancePx = 54f,
             tabRowHeightPx = 56f,
             isHeaderCollapseEnabled = true,
             searchRevealDeadZonePx = 8f
@@ -256,7 +255,7 @@ class iOSHomeHeaderVisualPolicyTest {
         val layout = resolveHomeHeaderScrollLayout(
             headerOffsetPx = -44f,
             searchBarHeightPx = 52f,
-            searchCollapseDistancePx = 63f,
+            headerCollapseDistancePx = 63f,
             tabRowHeightPx = 48f,
             isHeaderCollapseEnabled = true,
             searchRevealDeadZonePx = resolveHomeTopSearchRevealDeadZone(UiPreset.MD3).value,
@@ -328,7 +327,7 @@ class iOSHomeHeaderVisualPolicyTest {
         val layout = resolveHomeHeaderScrollLayout(
             headerOffsetPx = -26f,
             searchBarHeightPx = 52f,
-            searchCollapseDistancePx = 63f,
+            headerCollapseDistancePx = 63f,
             tabRowHeightPx = 48f,
             isHeaderCollapseEnabled = true,
             searchRevealDeadZonePx = 0f,
@@ -344,16 +343,18 @@ class iOSHomeHeaderVisualPolicyTest {
     @Test
     fun `home header collapse distance includes search spacing before pinned tabs`() {
         assertEquals(
-            52.dp,
-            resolveHomeTopSearchCollapseDistance(
+            100.dp,
+            resolveHomeHeaderCollapseDistance(
                 searchBarHeight = 48.dp,
+                tabRowHeight = 48.dp,
                 uiPreset = UiPreset.IOS
             )
         )
         assertEquals(
-            63.dp,
-            resolveHomeTopSearchCollapseDistance(
+            115.dp,
+            resolveHomeHeaderCollapseDistance(
                 searchBarHeight = 52.dp,
+                tabRowHeight = 52.dp,
                 uiPreset = UiPreset.MD3
             )
         )
@@ -543,9 +544,10 @@ class iOSHomeHeaderVisualPolicyTest {
             )
         )
         assertEquals(
-            59.dp,
-            resolveHomeTopSearchCollapseDistance(
+            109.dp,
+            resolveHomeHeaderCollapseDistance(
                 searchBarHeight = 50.dp,
+                tabRowHeight = 50.dp,
                 uiPreset = UiPreset.MD3,
                 androidNativeVariant = AndroidNativeVariant.MIUIX
             )
