@@ -8,10 +8,11 @@ class SettingsRootCategoryPolicyTest {
     @Test
     fun `mobile and tablet settings share scene based root category order`() {
         val expected = listOf(
+            SettingsRootCategory.SOCIAL_SUPPORT,
+            SettingsRootCategory.PLAYBACK_QUALITY,
             SettingsRootCategory.INTERFACE_THEME,
             SettingsRootCategory.HOME_FEED,
             SettingsRootCategory.NAVIGATION_LABELS,
-            SettingsRootCategory.PLAYBACK_QUALITY,
             SettingsRootCategory.FULLSCREEN_GESTURE,
             SettingsRootCategory.INTERACTION_COMMENT,
             SettingsRootCategory.DATA_BACKUP,
@@ -28,10 +29,11 @@ class SettingsRootCategoryPolicyTest {
     fun `scene based root categories expose user facing titles`() {
         assertEquals(
             listOf(
+                "关注与支持",
+                "播放与画质",
                 "界面与主题",
                 "首页与推荐",
                 "导航与标签",
-                "播放与画质",
                 "全屏与手势",
                 "互动与评论",
                 "数据与备份",
@@ -57,12 +59,17 @@ class SettingsRootCategoryPolicyTest {
             SettingsRootCategory.DIAGNOSTICS_DEVELOPER,
             resolveSettingsRootCategoryForSearchTarget(SettingsSearchTarget.DIAGNOSTICS)
         )
+        assertEquals(
+            SettingsRootCategory.SOCIAL_SUPPORT,
+            resolveSettingsRootCategoryForSearchTarget(SettingsSearchTarget.TELEGRAM)
+        )
     }
 
     @Test
     fun `root category list index points to content cards after search bar`() {
-        assertEquals(1, resolveSettingsRootCategoryListIndex(SettingsRootCategory.INTERFACE_THEME))
-        assertEquals(2, resolveSettingsRootCategoryListIndex(SettingsRootCategory.HOME_FEED))
-        assertEquals(10, resolveSettingsRootCategoryListIndex(SettingsRootCategory.ABOUT_SUPPORT))
+        assertEquals(1, resolveSettingsRootCategoryListIndex(SettingsRootCategory.SOCIAL_SUPPORT))
+        assertEquals(2, resolveSettingsRootCategoryListIndex(SettingsRootCategory.PLAYBACK_QUALITY))
+        assertEquals(3, resolveSettingsRootCategoryListIndex(SettingsRootCategory.INTERFACE_THEME))
+        assertEquals(11, resolveSettingsRootCategoryListIndex(SettingsRootCategory.ABOUT_SUPPORT))
     }
 }

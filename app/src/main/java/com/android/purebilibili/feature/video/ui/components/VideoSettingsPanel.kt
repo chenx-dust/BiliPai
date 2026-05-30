@@ -238,6 +238,12 @@ fun VideoSettingsPanel(
             initial = 2.0f,
             context = kotlin.coroutines.EmptyCoroutineContext
         )
+    val longPressSpeedLockEnabled by com.android.purebilibili.core.store.SettingsManager
+        .getLongPressSpeedLockEnabled(context)
+        .collectAsState(
+            initial = false,
+            context = kotlin.coroutines.EmptyCoroutineContext
+        )
     val twoFingerVerticalSpeedEnabled by com.android.purebilibili.core.store.SettingsManager
         .getTwoFingerVerticalSpeedEnabled(context)
         .collectAsState(
@@ -1100,6 +1106,51 @@ fun VideoSettingsPanel(
                                 com.android.purebilibili.core.store.SettingsManager.setLongPressSpeed(context, speed)
                             }
                         }
+                    )
+                }
+                SettingsDivider()
+            }
+
+            item {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 16.dp, vertical = 8.dp)
+                ) {
+                    Icon(
+                        imageVector = gestureTapIcon,
+                        contentDescription = null,
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.size(24.dp)
+                    )
+                    Spacer(modifier = Modifier.width(16.dp))
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(
+                            text = "长按倍速锁定",
+                            fontSize = 16.sp,
+                            fontWeight = FontWeight.Medium,
+                            color = MaterialTheme.colorScheme.onSurface
+                        )
+                        Text(
+                            text = "长按后拖至上下区域保持倍速",
+                            fontSize = 13.sp,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                    Switch(
+                        checked = longPressSpeedLockEnabled,
+                        onCheckedChange = { checked ->
+                            scope.launch {
+                                com.android.purebilibili.core.store.SettingsManager
+                                    .setLongPressSpeedLockEnabled(context, checked)
+                                if (checked) {
+                                    com.android.purebilibili.core.store.SettingsManager
+                                        .setLongPressSpeedLockHintShown(context, true)
+                                }
+                            }
+                        },
+                        modifier = Modifier.scale(0.8f)
                     )
                 }
                 SettingsDivider()

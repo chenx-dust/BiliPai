@@ -24,6 +24,7 @@ private const val VIDEO_PLAYER_COVER_REVEAL_HOLD_DELAY_MILLIS = 96
 private const val VIDEO_PLAYER_SURFACE_REVEAL_DURATION_MILLIS = 220
 private const val VIDEO_PLAYER_SURFACE_REVEAL_INITIAL_SCALE = 0.985f
 private const val LONG_PRESS_SPEED_TAP_SUPPRESSION_WINDOW_MS = 450L
+private const val LONG_PRESS_SPEED_UNLOCK_HOLD_MS = 1_000L
 
 internal const val LONG_PRESS_SPEED_LOCK_ZONE_HEIGHT_DP = 96
 internal const val FOREGROUND_SURFACE_RECOVERY_DELAY_MS = 80L
@@ -186,7 +187,7 @@ internal fun resolveLongPressSpeedStartDecision(
             requestedSpeed = requestedSpeed,
             currentAudioQuality = currentAudioQuality
         ),
-        clearExistingLock = longPressSpeedLocked
+        clearExistingLock = false
     )
 }
 
@@ -243,6 +244,7 @@ internal fun shouldTriggerPinchExitFullscreen(
 }
 
 internal fun shouldLockLongPressSpeedInTargetZone(
+    longPressSpeedLockEnabled: Boolean = true,
     isLongPressing: Boolean,
     alreadyLocked: Boolean,
     currentPointerY: Float,
@@ -251,6 +253,7 @@ internal fun shouldLockLongPressSpeedInTargetZone(
     accumulatedDragYPx: Float = 0f,
     minDragDistancePx: Float = 0f
 ): Boolean {
+    if (!longPressSpeedLockEnabled) return false
     if (!isLongPressing || alreadyLocked) return false
     if (containerHeightPx <= 0f || lockZoneHeightPx <= 0f) return false
     if (abs(accumulatedDragYPx) < minDragDistancePx.coerceAtLeast(0f)) return false
@@ -264,6 +267,23 @@ internal fun shouldConsumeExclusiveLongPressSpeedDrag(
     longPressSpeedLocked: Boolean
 ): Boolean {
     return isLongPressing && !longPressSpeedLocked
+}
+
+internal fun shouldUnlockLockedLongPressSpeedFromRightDownDrag(
+    longPressSpeedLocked: Boolean,
+    isLongPressing: Boolean,
+    startX: Float,
+    startY: Float,
+    currentY: Float,
+    containerWidthPx: Float,
+    holdDurationMs: Long,
+    minDownDragPx: Float,
+    minHoldDurationMs: Long = LONG_PRESS_SPEED_UNLOCK_HOLD_MS
+): Boolean {
+    if (!longPressSpeedLocked || !isLongPressing) return false
+    if (containerWidthPx <= 0f || startX < containerWidthPx * 0.5f) return false
+    if (holdDurationMs < minHoldDurationMs.coerceAtLeast(0L)) return false
+    return currentY - startY >= minDownDragPx.coerceAtLeast(0f)
 }
 
 internal fun shouldReapplyLockedLongPressSpeed(
@@ -424,7 +444,28 @@ internal fun shouldTriggerFullscreenBySwipe(
 internal fun shouldAllowPlaybackStateAutoFullscreen(
     smallestScreenWidthDp: Int
 ): Boolean {
-    return smallestScreenWidthDp < 600
+    return smallestScreenWidthDp > 0
+}
+
+internal fun shouldToggleAutoFullscreenForCurrentPlaybackSnapshot(
+    autoEnterFullscreenEnabled: Boolean,
+    autoExitFullscreenEnabled: Boolean,
+    allowPlaybackStateAutoFullscreen: Boolean,
+    playbackState: Int,
+    playWhenReady: Boolean,
+    hasAutoEnteredFullscreen: Boolean,
+    isFullscreen: Boolean
+): Boolean {
+    return shouldToggleAutoFullscreenForPlaybackEvent(
+        autoEnterFullscreenEnabled = autoEnterFullscreenEnabled,
+        autoExitFullscreenEnabled = autoExitFullscreenEnabled,
+        allowPlaybackStateAutoFullscreen = allowPlaybackStateAutoFullscreen,
+        playbackState = playbackState,
+        playWhenReady = playWhenReady,
+        hasAutoEnteredFullscreen = hasAutoEnteredFullscreen,
+        isFullscreen = isFullscreen,
+        previousPlayWhenReady = false
+    )
 }
 
 internal fun shouldToggleAutoFullscreenForPlaybackEvent(
@@ -849,6 +890,14 @@ internal fun shouldEnableForcedReturnCoverSharedBounds(
     sourceRoute: String?
 ): Boolean {
     val sourceRouteBase = sourceRoute?.substringBefore("?")
+    // Home 源返回时：详情↔首页卡片的整体 shell sharedBounds（[videoCardShellSharedElementKey]）
+    // 已经完整接管 morph。此处再额外挂一层封面 sharedBounds（[videoCoverSharedElementKey]）
+    // 会和 shell 错位——首页卡片侧并没有匹配 cover key 的对端（GlassVideoCard 完全没挂；
+    // VideoCard 仅在 `!useCardShellSharedBounds` 时挂，对 home 源永远 false），单边 morph + spring
+    // 终态过冲就是用户感知到的"封面回弹"。直接撤掉，让封面跟随 shell 一起被裁剪/缩放即可。
+    if (sourceRouteBase == com.android.purebilibili.navigation.ScreenRoutes.Home.route) {
+        return false
+    }
     val allowBySourceRoute = sourceRouteBase == null ||
         com.android.purebilibili.navigation.isVideoCardReturnTargetRoute(sourceRouteBase)
     return forceCoverDuringReturnAnimation &&
@@ -856,6 +905,15 @@ internal fun shouldEnableForcedReturnCoverSharedBounds(
         hasSharedTransitionScope &&
         hasAnimatedVisibilityScope &&
         allowBySourceRoute
+}
+
+internal fun resolveForcedReturnCoverSharedElementSourceRoute(sourceRoute: String?): String? {
+    val sourceRouteBase = sourceRoute?.substringBefore("?")
+    return if (sourceRouteBase == com.android.purebilibili.navigation.ScreenRoutes.Home.route) {
+        sourceRouteBase
+    } else {
+        null
+    }
 }
 
 internal fun shouldUseReturnLandingMotionForForcedReturnCover(

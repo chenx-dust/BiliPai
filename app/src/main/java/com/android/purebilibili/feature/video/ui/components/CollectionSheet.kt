@@ -182,6 +182,15 @@ fun CollectionSheet(
                         currentCid = currentCid,
                         episode = episode
                     )
+                    val publishTimeText = remember(episode.arc?.pubdate, episode.arc?.ctime) {
+                        resolveCollectionEpisodePublishTimeText(episode)
+                    }
+                    val metadataText = remember(publishTimeText, isCurrentEpisode) {
+                        buildList {
+                            if (publishTimeText.isNotBlank()) add(publishTimeText)
+                            if (isCurrentEpisode) add("正在播放")
+                        }.joinToString(" · ")
+                    }
                     
                     Row(
                         modifier = Modifier
@@ -275,13 +284,16 @@ fun CollectionSheet(
                                 overflow = TextOverflow.Ellipsis
                             )
                             
-                            //  正在播放标识
-                            if (isCurrentEpisode) {
+                            if (metadataText.isNotBlank()) {
                                 Spacer(modifier = Modifier.height(4.dp))
                                 Text(
-                                    text = "正在播放",
+                                    text = metadataText,
                                     style = MaterialTheme.typography.labelSmall,
-                                    color = iOSBlue,
+                                    color = if (isCurrentEpisode) {
+                                        iOSBlue
+                                    } else {
+                                        MaterialTheme.colorScheme.onSurfaceVariant
+                                    },
                                     fontWeight = FontWeight.Medium
                                 )
                             }

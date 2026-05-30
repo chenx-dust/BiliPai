@@ -267,9 +267,9 @@ fun PlaybackSettingsContent(
                     }
                     IOSGroup {
                         IOSSwitchItem(
-                            icon = CupertinoIcons.Default.Cpu,
+                            icon = rememberSettingsSemanticIcon(SettingsIconRole.HARDWARE_DECODER),
                             title = "启用硬件解码",
-                            subtitle = "减少发热和耗电 (推荐开启)",
+                            subtitle = "关闭后可尝试规避模拟器或特定设备绿屏，但可能更耗电/更卡顿",
                             checked = state.hwDecode,
                             onCheckedChange = {
                                 viewModel.toggleHwDecode(it)
@@ -317,8 +317,8 @@ fun PlaybackSettingsContent(
                 Box(modifier = Modifier.staggeredEntrance(3, isVisible, motionTier = effectiveMotionTier)) {
                     val scope = rememberCoroutineScope()
                     IOSGroup {
-                        IOSSwitchItem(
-                            icon = CupertinoIcons.Default.Clock,
+	                        IOSSwitchItem(
+	                            icon = rememberSettingsSemanticIcon(SettingsIconRole.PLAYBACK_SPEED),
                             title = "记忆上次播放速度",
                             subtitle = if (rememberLastPlaybackSpeed) {
                                 "新视频将优先使用你最后一次手动设置的速度"
@@ -389,8 +389,8 @@ fun PlaybackSettingsContent(
                     )
 
                     IOSGroup {
-                        IOSSwitchItem(
-                            icon = CupertinoIcons.Default.Pip,
+	                        IOSSwitchItem(
+	                            icon = rememberSettingsSemanticIcon(SettingsIconRole.STOP_ON_EXIT),
                             title = "离开播放页后停止",
                             subtitle = "不进入小窗/画中画，也不保留后台播放",
                             checked = stopPlaybackOnExit,
@@ -403,8 +403,8 @@ fun PlaybackSettingsContent(
                             iconTint = iOSOrange
                         )
                         IOSDivider()
-                        IOSSwitchItem(
-                            icon = CupertinoIcons.Default.Play,
+	                        IOSSwitchItem(
+	                            icon = rememberSettingsSemanticIcon(SettingsIconRole.BACKGROUND_PLAYBACK),
                             title = "后台播放",
                             subtitle = if (backgroundPlaybackEnabled) {
                                 "已开启：离开应用或锁屏时仍可继续播放"
@@ -421,8 +421,8 @@ fun PlaybackSettingsContent(
                             iconTint = iOSGreen
                         )
                         IOSDivider()
-                        IOSSwitchItem(
-                            icon = CupertinoIcons.Default.SpeakerWave2,
+	                        IOSSwitchItem(
+	                            icon = rememberSettingsSemanticIcon(SettingsIconRole.AUDIO_FOCUS),
                             title = "占用音频焦点",
                             subtitle = if (audioFocusEnabled) {
                                 "已开启：会优先接管系统媒体音频焦点"
@@ -504,8 +504,8 @@ fun PlaybackSettingsContent(
                             }
                         }
                         IOSDivider()
-                        IOSSwitchItem(
-                            icon = CupertinoIcons.Default.TextBubble,
+	                        IOSSwitchItem(
+	                            icon = rememberSettingsSemanticIcon(SettingsIconRole.PIP_DANMAKU),
                             title = "小窗/画中画不加载弹幕",
                             subtitle = if (!backgroundPlaybackEnabled) {
                                 "开启后台播放后，小窗和画中画相关设置才会生效"
@@ -527,8 +527,8 @@ fun PlaybackSettingsContent(
                             iconTint = com.android.purebilibili.core.theme.iOSPurple
                         )
                         IOSDivider()
-                        IOSSwitchItem(
-                            icon = CupertinoIcons.Default.Headphones,
+	                        IOSSwitchItem(
+	                            icon = rememberSettingsSemanticIcon(SettingsIconRole.AUDIO_MODE_PIP),
                             title = "听视频离开时自动进入画中画",
                             subtitle = if (audioModeAutoPipToggleEnabled) {
                                 if (audioModeAutoPipEnabled) {
@@ -631,8 +631,8 @@ fun PlaybackSettingsContent(
             item {
                 Box(modifier = Modifier.staggeredEntrance(9, isVisible, motionTier = effectiveMotionTier)) {
                     IOSGroup {
-                        IOSSwitchItem(
-                            icon = CupertinoIcons.Default.ChartBar,
+	                        IOSSwitchItem(
+	                            icon = rememberSettingsSemanticIcon(SettingsIconRole.PLAYER_STATS),
                             title = "详细统计信息",
                             subtitle = "显示编解码、码率等极客信息",
                             checked = isStatsEnabled,
@@ -644,8 +644,8 @@ fun PlaybackSettingsContent(
                         )
                         IOSDivider()
                         val scope = rememberCoroutineScope()
-                        IOSSwitchItem(
-                            icon = CupertinoIcons.Default.InfoCircle,
+	                        IOSSwitchItem(
+	                            icon = rememberSettingsSemanticIcon(SettingsIconRole.PLAYER_DIAGNOSTIC_LOGS),
                             title = "播放器诊断日志",
                             subtitle = "记录黑屏、卡顿、点击无响应等播放器诊断信息",
                             checked = playerDiagnosticLoggingEnabled,
@@ -657,8 +657,8 @@ fun PlaybackSettingsContent(
                             iconTint = iOSOrange
                         )
                         IOSDivider()
-                        IOSSwitchItem(
-                            icon = CupertinoIcons.Default.ExclamationmarkTriangle,
+	                        IOSSwitchItem(
+	                            icon = rememberSettingsSemanticIcon(SettingsIconRole.QUALITY_WARNING_ONCE),
                             title = "画质降档诊断弹窗",
                             subtitle = "仅在明确切换失败、权限或接口异常时提示；视频本身无更高档不打断播放",
                             checked = qualitySwitchFailureDialogEnabled,
@@ -670,8 +670,8 @@ fun PlaybackSettingsContent(
                             iconTint = iOSOrange
                         )
                         IOSDivider()
-                        IOSSwitchItem(
-                            icon = CupertinoIcons.Default.Clock,
+	                        IOSSwitchItem(
+	                            icon = rememberSettingsSemanticIcon(SettingsIconRole.QUALITY_WARNING),
                             title = "降档弹窗仅提示一次",
                             subtitle = if (qualitySwitchFailureDialogEnabled) {
                                 "首次弹出后不再重复打断播放；关闭本项会重置提示记录"
@@ -746,8 +746,8 @@ fun PlaybackSettingsContent(
                     )
 
                     IOSGroup {
-                        IOSSwitchItem(
-                            icon = CupertinoIcons.Default.ChartBar,
+	                        IOSSwitchItem(
+	                            icon = rememberSettingsSemanticIcon(SettingsIconRole.DIRECTED_TRAFFIC),
                             title = "B站定向流量支持",
                             subtitle = if (directedTrafficEnabled) {
                                 "移动数据下优先使用应用内播放链路（实验性）"
@@ -766,8 +766,8 @@ fun PlaybackSettingsContent(
 
                         IOSDivider()
 
-                        IOSSwitchItem(
-                            icon = CupertinoIcons.Default.Sparkles,
+	                        IOSSwitchItem(
+	                            icon = rememberSettingsSemanticIcon(SettingsIconRole.AUTO_HIGHEST_QUALITY),
                             title = "自动最高画质",
                             subtitle = if (autoHighestQualityEnabled) {
                                 "已开启，按每个视频实际最高可播档自动选择；没有 4K/HDR 时不会当作异常"
@@ -905,8 +905,8 @@ fun PlaybackSettingsContent(
 
                         IOSDivider()
 
-                        IOSSwitchItem(
-                            icon = CupertinoIcons.Default.Photo,
+	                        IOSSwitchItem(
+	                            icon = rememberSettingsSemanticIcon(SettingsIconRole.HOME_COVER_GLASS),
                             title = "省流量时降低首页封面清晰度",
                             subtitle = if (homeSettings.lowQualityHomeCoverInDataSaver) {
                                 "开启后仅在省流量模式生效时加载低清晰度首页封面"
@@ -977,6 +977,12 @@ private fun PlaybackInteractionSettingsSection(
     val videoAiSummaryEntryEnabled by com.android.purebilibili.core.store.SettingsManager
         .getVideoAiSummaryEntryEnabled(context)
         .collectAsState(initial = true)
+    val videoNoteEnabled by com.android.purebilibili.core.store.SettingsManager
+        .getVideoNoteEnabled(context)
+        .collectAsState(initial = true)
+    val videoNoteDefaultCollapsed by com.android.purebilibili.core.store.SettingsManager
+        .getVideoNoteDefaultCollapsed(context)
+        .collectAsState(initial = false)
     val videoInfoDefaultExpanded by com.android.purebilibili.core.store.SettingsManager
         .getVideoInfoDefaultExpanded(context)
         .collectAsState(initial = true)
@@ -1007,8 +1013,8 @@ private fun PlaybackInteractionSettingsSection(
         val clickToPlayEnabled by com.android.purebilibili.core.store.SettingsManager
             .getClickToPlay(context).collectAsState(initial = true)
 
-        IOSSwitchItem(
-            icon = CupertinoIcons.Default.PlayCircle,
+	        IOSSwitchItem(
+	            icon = rememberSettingsSemanticIcon(SettingsIconRole.AUTO_PLAY_ON_OPEN),
             title = "进入视频自动播放",
             subtitle = if (clickToPlayEnabled) {
                 "进入视频详情页时自动开始播放"
@@ -1025,8 +1031,8 @@ private fun PlaybackInteractionSettingsSection(
             iconTint = com.android.purebilibili.core.theme.iOSBlue
         )
         IOSDivider()
-        IOSSwitchItem(
-            icon = CupertinoIcons.Default.ArrowTriangle2Circlepath,
+	        IOSSwitchItem(
+	            icon = rememberSettingsSemanticIcon(SettingsIconRole.PLAYBACK_SPEED),
             title = "续播弹窗提示",
             subtitle = if (resumePlaybackPromptEnabled) {
                 "检测到历史进度时仅提醒一次"
@@ -1044,8 +1050,8 @@ private fun PlaybackInteractionSettingsSection(
         )
         IOSDivider()
         //  [新增] 自动播放下一个视频
-        IOSSwitchItem(
-            icon = CupertinoIcons.Default.ForwardEnd,
+	        IOSSwitchItem(
+	            icon = rememberSettingsSemanticIcon(SettingsIconRole.AUTO_PLAY_NEXT),
             title = "自动播放下一个",
             subtitle = "普通视频结束后自动播放推荐视频",
             checked = autoPlayEnabled,
@@ -1058,8 +1064,8 @@ private fun PlaybackInteractionSettingsSection(
             iconTint = com.android.purebilibili.core.theme.iOSPurple
         )
         IOSDivider()
-        IOSSwitchItem(
-            icon = CupertinoIcons.Default.ListBullet,
+	        IOSSwitchItem(
+	            icon = rememberSettingsSemanticIcon(SettingsIconRole.PLAYBACK),
             title = "列表/收藏夹连续播放",
             subtitle = "控制收藏夹、稍后再看、合集等列表播放完后是否继续下一条",
             checked = externalPlaylistAutoContinueEnabled,
@@ -1131,8 +1137,8 @@ private fun PlaybackInteractionSettingsSection(
             )
             IOSDivider()
         }
-        IOSSwitchItem(
-            icon = CupertinoIcons.Default.InfoCircle,
+	        IOSSwitchItem(
+	            icon = rememberSettingsSemanticIcon(SettingsIconRole.VIDEO_DESCRIPTION),
             title = "默认展开视频简介",
             subtitle = if (videoInfoDefaultExpanded) {
                 "进入视频页时默认展开标题、简介和标签"
@@ -1150,7 +1156,7 @@ private fun PlaybackInteractionSettingsSection(
         )
         IOSDivider()
         IOSSwitchItem(
-            icon = CupertinoIcons.Default.Sparkles,
+            icon = rememberSettingsSemanticIcon(SettingsIconRole.AI_SUMMARY),
             title = "显示 AI 总结入口",
             subtitle = if (videoAiSummaryEntryEnabled) {
                 "视频简介区展示 AI 总结按钮，点按后展开内容"
@@ -1168,7 +1174,45 @@ private fun PlaybackInteractionSettingsSection(
         )
         IOSDivider()
         IOSSwitchItem(
-            icon = CupertinoIcons.Default.HandThumbsup,
+            icon = rememberSettingsSemanticIcon(SettingsIconRole.VIDEO_NOTE),
+            title = "显示视频笔记",
+            subtitle = if (videoNoteEnabled) {
+                "视频简介区展示笔记入口，并加载私有笔记和公开笔记"
+            } else {
+                "关闭后隐藏笔记入口，并跳过视频笔记接口"
+            },
+            checked = videoNoteEnabled,
+            onCheckedChange = {
+                scope.launch {
+                    com.android.purebilibili.core.store.SettingsManager
+                        .setVideoNoteEnabled(context, it)
+                }
+            },
+            iconTint = iOSTeal
+        )
+        if (videoNoteEnabled) {
+            IOSDivider()
+            IOSSwitchItem(
+                icon = rememberSettingsSemanticIcon(SettingsIconRole.VIDEO_NOTE_COLLAPSE),
+                title = "默认折叠视频笔记",
+                subtitle = if (videoNoteDefaultCollapsed) {
+                    "进入视频页时先显示笔记摘要，需要时再展开"
+                } else {
+                    "进入视频页时直接展开视频笔记内容和操作"
+                },
+                checked = videoNoteDefaultCollapsed,
+                onCheckedChange = {
+                    scope.launch {
+                        com.android.purebilibili.core.store.SettingsManager
+                            .setVideoNoteDefaultCollapsed(context, it)
+                    }
+                },
+                iconTint = com.android.purebilibili.core.theme.iOSBlue
+            )
+        }
+        IOSDivider()
+	        IOSSwitchItem(
+	            icon = rememberSettingsSemanticIcon(SettingsIconRole.LIKE_INTERACTION),
             title = "双击点赞",
             subtitle = "双击视频画面快捷点赞",
             checked = state.doubleTapLike,
@@ -1181,8 +1225,8 @@ private fun PlaybackInteractionSettingsSection(
         )
         IOSDivider()
         IOSSlidingSegmentedSetting(
-            title = "评论回复预览：${commentCollapsedReplyPreviewLimit}条",
-            subtitle = "一级评论下默认展开的回复数量",
+            title = "评论回复收起预览：${commentCollapsedReplyPreviewLimit}条",
+            subtitle = "收起楼中楼时保留的回复数量",
             options = listOf(
                 PlaybackSegmentOption(3, "3条"),
                 PlaybackSegmentOption(5, "5条"),
@@ -1198,8 +1242,8 @@ private fun PlaybackInteractionSettingsSection(
             }
         )
         IOSDivider()
-        IOSSwitchItem(
-            icon = CupertinoIcons.Default.TextBubble,
+	        IOSSwitchItem(
+	            icon = rememberSettingsSemanticIcon(SettingsIconRole.INTERACTION_COMMENT),
             title = "评论发送检测",
             subtitle = "发送成功后自动检查评论是否正常显示",
             checked = commentFraudDetectionEnabled,
@@ -1212,8 +1256,8 @@ private fun PlaybackInteractionSettingsSection(
             iconTint = com.android.purebilibili.core.theme.iOSBlue
         )
         IOSDivider()
-        IOSSwitchItem(
-            icon = CupertinoIcons.Default.PaintbrushPointed,
+	        IOSSwitchItem(
+	            icon = rememberSettingsSemanticIcon(SettingsIconRole.COMMENT_DECORATION),
             title = "评论区个性装扮",
             subtitle = "显示粉丝牌、铭牌和装扮卡片；关闭后评论区更清爽",
             checked = commentMemberDecorationsEnabled,
@@ -1226,8 +1270,8 @@ private fun PlaybackInteractionSettingsSection(
             iconTint = iOSOrange
         )
         IOSDivider()
-        IOSSwitchItem(
-            icon = CupertinoIcons.Default.ArrowDownCircle,
+	        IOSSwitchItem(
+	            icon = rememberSettingsSemanticIcon(SettingsIconRole.DOWNLOAD_PATH),
             title = "图片长按保存",
             subtitle = if (imagePreviewLongPressSaveEnabled) {
                 "查看图片时长按会直接保存到相册"
@@ -1254,7 +1298,7 @@ private fun PlaybackFullscreenGestureSettingsSection(
     val scope = rememberCoroutineScope()
     val portraitPlayerCollapseMode by com.android.purebilibili.core.store.SettingsManager
         .getPortraitPlayerCollapseMode(context)
-        .collectAsState(initial = PortraitPlayerCollapseMode.OFF)
+        .collectAsState(initial = PortraitPlayerCollapseMode.INTRO_ONLY)
     val portraitSwipeToFullscreenEnabled by com.android.purebilibili.core.store.SettingsManager
         .getPortraitSwipeToFullscreenEnabled(context).collectAsState(initial = true)
     val centerSwipeToFullscreenEnabled by com.android.purebilibili.core.store.SettingsManager
@@ -1351,8 +1395,8 @@ private fun PlaybackFullscreenGestureSettingsSection(
             }
         }
         IOSDivider()
-        IOSSwitchItem(
-            icon = CupertinoIcons.Default.EyeSlash,
+	        IOSSwitchItem(
+	            icon = rememberSettingsSemanticIcon(SettingsIconRole.INTERACTIVE_COMMANDS),
             title = "隐藏视频内互动提示",
             subtitle = if (hideInteractiveCommandDanmaku) {
                 "已开启：不显示关注、一键三连、UP 提示和投票等视频内互动提示"
@@ -1390,8 +1434,8 @@ private fun PlaybackFullscreenGestureSettingsSection(
         }
 
         IOSDivider()
-        IOSSwitchItem(
-            icon = CupertinoIcons.Default.ArrowLeftArrowRight,
+	        IOSSwitchItem(
+	            icon = rememberSettingsSemanticIcon(SettingsIconRole.PORTRAIT_SWIPE_FULLSCREEN),
             title = "竖屏上滑进入全屏",
             subtitle = if (portraitSwipeToFullscreenEnabled) {
                 "开启后在竖屏下向上滑动可快速进入全屏"
@@ -1409,8 +1453,8 @@ private fun PlaybackFullscreenGestureSettingsSection(
         )
 
         IOSDivider()
-        IOSSwitchItem(
-            icon = CupertinoIcons.Default.HandTap,
+	        IOSSwitchItem(
+	            icon = rememberSettingsSemanticIcon(SettingsIconRole.CENTER_SWIPE_FULLSCREEN),
             title = "中部滑动切换全屏",
             subtitle = if (centerSwipeToFullscreenEnabled) {
                 "开启后：播放器中部纵向滑动可切换进入/退出全屏（受手势反向影响）"
@@ -1428,8 +1472,8 @@ private fun PlaybackFullscreenGestureSettingsSection(
         )
 
         IOSDivider()
-        IOSSwitchItem(
-            icon = CupertinoIcons.Default.SpeakerWave2,
+	        IOSSwitchItem(
+	            icon = rememberSettingsSemanticIcon(SettingsIconRole.AUDIO_FOCUS),
             title = "左右侧滑动调节亮度/音量",
             subtitle = if (slideVolumeBrightnessEnabled) {
                 "左侧上下滑调亮度，右侧上下滑调音量"
@@ -1446,8 +1490,8 @@ private fun PlaybackFullscreenGestureSettingsSection(
             iconTint = iOSTeal
         )
         IOSDivider()
-        IOSSwitchItem(
-            icon = CupertinoIcons.Default.SunMax,
+	        IOSSwitchItem(
+	            icon = rememberSettingsSemanticIcon(SettingsIconRole.SYSTEM_BRIGHTNESS),
             title = "调节系统亮度",
             subtitle = if (slideVolumeBrightnessEnabled) {
                 "开启后亮度手势会尝试同步系统亮度（需系统允许）"
@@ -1615,8 +1659,8 @@ private fun PlaybackFullscreenGestureSettingsSection(
             "主要用于平板/折叠屏，当前设备触发场景可能较少"
         }
 
-        IOSSwitchItem(
-            icon = CupertinoIcons.Default.ArrowTriangle2CirclepathCamera,  // 旋转图标
+	        IOSSwitchItem(
+	            icon = rememberSettingsSemanticIcon(SettingsIconRole.FULLSCREEN_ORIENTATION),
             title = "自动横竖屏切换",
             subtitle = "跟随手机方向自动进入/退出全屏",
             checked = autoRotateEnabled,
@@ -1629,8 +1673,8 @@ private fun PlaybackFullscreenGestureSettingsSection(
             iconTint = iOSTeal
         )
         IOSDivider()
-        IOSSwitchItem(
-            icon = CupertinoIcons.Default.Eye,
+	        IOSSwitchItem(
+	            icon = rememberSettingsSemanticIcon(SettingsIconRole.HORIZONTAL_ADAPTATION),
             title = "横屏适配",
             subtitle = horizontalAdaptationSubtitle,
             checked = horizontalAdaptationEnabled,
@@ -1686,8 +1730,8 @@ private fun PlaybackFullscreenGestureSettingsSection(
             }
         )
         IOSDivider()
-        IOSSwitchItem(
-            icon = CupertinoIcons.Default.ArrowUpArrowDown,
+	        IOSSwitchItem(
+	            icon = rememberSettingsSemanticIcon(SettingsIconRole.FULLSCREEN_GESTURE_REVERSE),
             title = "全屏手势反向",
             subtitle = "默认上滑进全屏、下滑退全屏；开启后方向反转",
             checked = fullscreenGestureReverse,
@@ -1700,8 +1744,8 @@ private fun PlaybackFullscreenGestureSettingsSection(
             iconTint = com.android.purebilibili.core.theme.iOSPurple
         )
         IOSDivider()
-        IOSSwitchItem(
-            icon = CupertinoIcons.Default.RectangleStack,
+	        IOSSwitchItem(
+	            icon = rememberSettingsSemanticIcon(SettingsIconRole.HIDE_STATUS_BAR),
             title = "播放页隐藏状态栏",
             subtitle = if (hideVideoPageStatusBar) {
                 "普通播放页隐藏顶部系统状态栏，底部手势条保持显示"
@@ -1718,8 +1762,8 @@ private fun PlaybackFullscreenGestureSettingsSection(
             iconTint = com.android.purebilibili.core.theme.iOSTeal
         )
         IOSDivider()
-        IOSSwitchItem(
-            icon = CupertinoIcons.Default.ArrowUpLeftAndArrowDownRight,
+	        IOSSwitchItem(
+	            icon = rememberSettingsSemanticIcon(SettingsIconRole.AUTO_ENTER_FULLSCREEN),
             title = "自动进入全屏",
             subtitle = "视频开始播放后自动切到全屏",
             checked = autoEnterFullscreen,
@@ -1732,8 +1776,8 @@ private fun PlaybackFullscreenGestureSettingsSection(
             iconTint = com.android.purebilibili.core.theme.iOSGreen
         )
         IOSDivider()
-        IOSSwitchItem(
-            icon = CupertinoIcons.Default.ArrowDownRightAndArrowUpLeft,
+	        IOSSwitchItem(
+	            icon = rememberSettingsSemanticIcon(SettingsIconRole.AUTO_EXIT_FULLSCREEN),
             title = "自动退出全屏",
             subtitle = "视频结束播放后自动退出全屏",
             checked = autoExitFullscreen,
@@ -1746,8 +1790,8 @@ private fun PlaybackFullscreenGestureSettingsSection(
             iconTint = iOSOrange
         )
         IOSDivider()
-        IOSSwitchItem(
-            icon = CupertinoIcons.Default.Lock,
+	        IOSSwitchItem(
+	            icon = rememberSettingsSemanticIcon(SettingsIconRole.FULLSCREEN_LOCK),
             title = "全屏显示锁定按钮",
             subtitle = "控制层中显示防误触锁定按钮",
             checked = showFullscreenLockButton,
@@ -1760,8 +1804,8 @@ private fun PlaybackFullscreenGestureSettingsSection(
             iconTint = iOSTeal
         )
         IOSDivider()
-        IOSSwitchItem(
-            icon = CupertinoIcons.Default.Camera,
+	        IOSSwitchItem(
+	            icon = rememberSettingsSemanticIcon(SettingsIconRole.FULLSCREEN_SCREENSHOT),
             title = "全屏显示截图按钮",
             subtitle = "控制层中显示快速截图入口",
             checked = showFullscreenScreenshotButton,
@@ -1774,8 +1818,8 @@ private fun PlaybackFullscreenGestureSettingsSection(
             iconTint = com.android.purebilibili.core.theme.iOSBlue
         )
         IOSDivider()
-        IOSSwitchItem(
-            icon = CupertinoIcons.Default.Photo,
+	        IOSSwitchItem(
+	            icon = rememberSettingsSemanticIcon(SettingsIconRole.CLEAN_SCREENSHOT),
             title = "应用内干净截图",
             subtitle = "在 BiliPai 前台通过应用内手势导出当前窗口 PNG",
             checked = appGestureScreenshotEnabled,
@@ -1811,8 +1855,8 @@ private fun PlaybackFullscreenGestureSettingsSection(
             }
         )
         IOSDivider()
-        IOSSwitchItem(
-            icon = CupertinoIcons.Default.Battery100,
+	        IOSSwitchItem(
+	            icon = rememberSettingsSemanticIcon(SettingsIconRole.BATTERY_STATUS),
             title = "全屏显示电量",
             subtitle = "在横屏左上角展示电池图标和电量百分比",
             checked = showFullscreenBatteryLevel,
@@ -1825,8 +1869,8 @@ private fun PlaybackFullscreenGestureSettingsSection(
             iconTint = iOSGreen
         )
         IOSDivider()
-        IOSSwitchItem(
-            icon = CupertinoIcons.Default.Clock,
+	        IOSSwitchItem(
+	            icon = rememberSettingsSemanticIcon(SettingsIconRole.TIME_STATUS),
             title = "全屏显示时间",
             subtitle = "在横屏左上角单独展示当前时间",
             checked = showFullscreenTime,
@@ -1839,8 +1883,8 @@ private fun PlaybackFullscreenGestureSettingsSection(
             iconTint = iOSTeal
         )
         IOSDivider()
-        IOSSwitchItem(
-            icon = CupertinoIcons.Default.SquareAndArrowUp,
+	        IOSSwitchItem(
+	            icon = rememberSettingsSemanticIcon(SettingsIconRole.PLAYER_ACTIONS),
             title = "全屏显示互动按钮",
             subtitle = if (showFullscreenActionItems) {
                 "横屏顶部显示点赞/投币/分享等快捷操作"
@@ -1857,8 +1901,8 @@ private fun PlaybackFullscreenGestureSettingsSection(
             iconTint = com.android.purebilibili.core.theme.iOSPink
         )
         IOSDivider()
-        IOSSwitchItem(
-            icon = CupertinoIcons.Default.ChartBar,
+	        IOSSwitchItem(
+	            icon = rememberSettingsSemanticIcon(SettingsIconRole.ONLINE_COUNT),
             title = "卡片与视频页观看人数",
             subtitle = if (showOnlineCount) {
                 "首页、搜索等视频卡片和视频页显示“xx人正在看”"

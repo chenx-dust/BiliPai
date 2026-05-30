@@ -4,6 +4,7 @@ import androidx.datastore.preferences.core.booleanPreferencesKey
 import androidx.datastore.preferences.core.floatPreferencesKey
 import androidx.datastore.preferences.core.intPreferencesKey
 import androidx.datastore.preferences.core.mutablePreferencesOf
+import androidx.datastore.preferences.core.stringPreferencesKey
 import com.android.purebilibili.core.theme.UiPreset
 import kotlin.test.Test
 import kotlin.test.assertEquals
@@ -22,6 +23,7 @@ class HomeSettingsMappingPolicyTest {
         assertTrue(result.isBottomBarFloating)
         assertEquals(0, result.bottomBarLabelMode)
         assertEquals(SettingsManager.TopTabLabelMode.TEXT_ONLY, result.topTabLabelMode)
+        assertEquals(HomeTopRightAction.SETTINGS, result.homeTopRightAction)
         assertTrue(result.isHeaderBlurEnabled)
         assertEquals(HomeHeaderBlurMode.FOLLOW_PRESET, result.headerBlurMode)
         assertTrue(result.isBottomBarBlurEnabled)
@@ -41,7 +43,6 @@ class HomeSettingsMappingPolicyTest {
         assertFalse(result.cardAnimationEnabled)
         assertTrue(result.cardTransitionEnabled)
         assertTrue(result.videoTransitionRealtimeBlurEnabled)
-        assertTrue(result.predictiveBackAnimationEnabled)
         assertFalse(result.smartVisualGuardEnabled)
         assertTrue(result.compactVideoStatsOnCover)
         assertTrue(result.showHomeVideoDurationBadges)
@@ -60,6 +61,7 @@ class HomeSettingsMappingPolicyTest {
             booleanPreferencesKey("bottom_bar_floating") to false,
             intPreferencesKey("bottom_bar_label_mode") to 2,
             intPreferencesKey("top_tab_label_mode") to 1,
+            intPreferencesKey("home_top_right_action") to HomeTopRightAction.INBOX.value,
             booleanPreferencesKey("header_blur_enabled") to false,
             booleanPreferencesKey("header_collapse_enabled") to false,
             booleanPreferencesKey("bottom_bar_blur_enabled") to false,
@@ -68,7 +70,7 @@ class HomeSettingsMappingPolicyTest {
             booleanPreferencesKey("bottom_bar_interactive_highlight_enabled") to false,
             booleanPreferencesKey("bottom_bar_search_enabled") to true,
             intPreferencesKey("bottom_bar_search_auto_expand_mode") to BottomBarSearchAutoExpandMode.DISABLED.value,
-            intPreferencesKey("bottom_bar_liquid_glass_preset") to BottomBarLiquidGlassPreset.BACKDROP_NATIVE.value,
+            intPreferencesKey("bottom_bar_liquid_glass_preset") to 1,
             booleanPreferencesKey("android_native_liquid_glass_enabled") to true,
             intPreferencesKey("liquid_glass_style") to LiquidGlassStyle.IOS26.value,
             intPreferencesKey("grid_column_count") to 4,
@@ -76,7 +78,6 @@ class HomeSettingsMappingPolicyTest {
             booleanPreferencesKey("card_animation_enabled") to true,
             booleanPreferencesKey("card_transition_enabled") to false,
             booleanPreferencesKey("video_transition_realtime_blur_enabled") to false,
-            booleanPreferencesKey("predictive_back_animation_enabled") to false,
             booleanPreferencesKey("smart_visual_guard_enabled") to false,
             booleanPreferencesKey("compact_video_stats_on_cover") to false,
             booleanPreferencesKey("home_video_duration_badges_visible") to false,
@@ -94,6 +95,7 @@ class HomeSettingsMappingPolicyTest {
         assertFalse(result.isBottomBarFloating)
         assertEquals(2, result.bottomBarLabelMode)
         assertEquals(1, result.topTabLabelMode)
+        assertEquals(HomeTopRightAction.INBOX, result.homeTopRightAction)
         assertFalse(result.isHeaderBlurEnabled)
         assertEquals(HomeHeaderBlurMode.ALWAYS_OFF, result.headerBlurMode)
         assertFalse(result.isHeaderCollapseEnabled)
@@ -105,7 +107,8 @@ class HomeSettingsMappingPolicyTest {
         assertEquals(BottomBarSearchAutoExpandMode.DISABLED, result.bottomBarSearchAutoExpandMode)
         assertTrue(result.androidNativeLiquidGlassEnabled)
         assertFalse(result.isLiquidGlassEnabled)
-        assertEquals(BottomBarLiquidGlassPreset.BACKDROP_NATIVE, result.bottomBarLiquidGlassPreset)
+        // bottom_bar_liquid_glass_preset = 1 现在解析为 iOS 26 玻璃（早期为占位回退 BILIPAI）
+        assertEquals(BottomBarLiquidGlassPreset.IOS26_REFINED, result.bottomBarLiquidGlassPreset)
         assertEquals(LiquidGlassStyle.SUKISU, result.liquidGlassStyle)
         assertEquals(LiquidGlassMode.BALANCED, result.liquidGlassMode)
         assertEquals(0.52f, result.liquidGlassStrength)
@@ -115,7 +118,6 @@ class HomeSettingsMappingPolicyTest {
         assertTrue(result.cardAnimationEnabled)
         assertFalse(result.cardTransitionEnabled)
         assertFalse(result.videoTransitionRealtimeBlurEnabled)
-        assertFalse(result.predictiveBackAnimationEnabled)
         assertFalse(result.smartVisualGuardEnabled)
         assertFalse(result.compactVideoStatsOnCover)
         assertFalse(result.showHomeVideoDurationBadges)
@@ -136,6 +138,17 @@ class HomeSettingsMappingPolicyTest {
         val result = mapHomeSettingsFromPreferences(prefs)
 
         assertEquals(HomeFeedCardWidthPreset.AUTO, result.homeFeedCardWidthPreset)
+    }
+
+    @Test
+    fun invalidHomeTopRightActionFallsBackToSettings() {
+        val prefs = mutablePreferencesOf(
+            intPreferencesKey("home_top_right_action") to 99
+        )
+
+        val result = mapHomeSettingsFromPreferences(prefs)
+
+        assertEquals(HomeTopRightAction.SETTINGS, result.homeTopRightAction)
     }
 
     @Test

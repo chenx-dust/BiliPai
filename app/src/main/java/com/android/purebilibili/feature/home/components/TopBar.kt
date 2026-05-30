@@ -14,7 +14,9 @@ import androidx.compose.material.icons.outlined.TrendingUp
 import androidx.compose.material.icons.outlined.Tv
 
 import androidx.compose.animation.*
+import androidx.compose.animation.core.Spring
 import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.spring
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -50,6 +52,9 @@ import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Shape
 import androidx.compose.ui.graphics.luminance
+import androidx.compose.ui.layout.boundsInWindow
+import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.text.font.FontWeight
@@ -88,6 +93,7 @@ import androidx.compose.foundation.combinedClickable // [Added]
 import top.yukonga.miuix.kmp.basic.TabRowDefaults as MiuixTabRowDefaults
 import top.yukonga.miuix.kmp.basic.TabRowWithContour as MiuixTabRowWithContour
 import top.yukonga.miuix.kmp.theme.MiuixTheme
+import java.io.File
 
 internal fun resolveFloatingIndicatorStartPaddingPx(
     baseInsetPx: Float,
@@ -146,12 +152,22 @@ internal fun resolveMiuixVisibleTabIndices(
     if (totalCount <= 0 || maxVisibleCount <= 0) return emptyList()
     val visibleCount = totalCount.coerceAtMost(maxVisibleCount)
     val safeSelectedIndex = selectedIndex.coerceIn(0, totalCount - 1)
-    val startIndex = if (safeSelectedIndex < visibleCount) {
-        0
-    } else {
-        (safeSelectedIndex - visibleCount + 1).coerceAtMost(totalCount - visibleCount)
+    if (safeSelectedIndex < visibleCount) {
+        return (0 until visibleCount).toList()
     }
-    return (startIndex until startIndex + visibleCount).toList()
+
+    // MIUIX 原生 TabRow 会在 tabs 列表整体左移时重建指示器起点，
+    // 第 5 个标签容易先跳到前槽位再滑过去；固定前置槽位，只替换尾槽。
+    val pinnedLeadingCount = (visibleCount - 1).coerceAtLeast(0)
+    return (0 until pinnedLeadingCount).toList() + safeSelectedIndex
+}
+
+internal fun resolveMiuixSelectedVisibleIndex(
+    visibleIndices: List<Int>,
+    selectedIndex: Int
+): Int {
+    val resolved = visibleIndices.indexOf(selectedIndex)
+    return if (resolved >= 0) resolved else 0
 }
 
 internal fun resolveTopTabMinItemWidthDp(isFloatingStyle: Boolean): Float {
@@ -320,6 +336,29 @@ internal fun resolveHomeSkinTopTabActionButtonSize(): Dp = 44.dp
 internal fun resolveHomeSkinTopTabActionIconSize(): Dp = 24.dp
 
 internal fun resolveHomeSkinTopTabIndicatorBottomPadding(): Dp = 4.dp
+
+internal fun resolveTopTabSkinStickerIconSize(showText: Boolean): Dp =
+    if (showText) 32.dp else 36.dp
+
+internal fun resolveTopTabSkinPartitionIconSize(): Dp = 32.dp
+
+internal fun resolveTopTabSkinStickerIndicatorWidth(): Dp = 28.dp
+
+internal fun resolveTopTabSkinStickerRowHeight(
+    baseRowHeight: Dp,
+    hasSkinStickerIcons: Boolean,
+    showIcon: Boolean,
+    showText: Boolean
+): Dp {
+    return if (hasSkinStickerIcons && showIcon && showText) {
+        baseRowHeight.coerceAtLeast(64.dp)
+    } else {
+        baseRowHeight
+    }
+}
+
+internal fun resolveTopTabSkinStickerItemVerticalPadding(showText: Boolean): Dp =
+    if (showText) 2.dp else 4.dp
 
 internal fun resolveIosTopTabRowHeight(
     isFloatingStyle: Boolean,
@@ -502,6 +541,22 @@ internal fun resolveTopTabUnselectedColor(isLightMode: Boolean): Color {
     }
 }
 
+internal fun resolveIosTopTabSelectedContentColor(colorScheme: ColorScheme): Color =
+    colorScheme.primary
+
+internal fun resolveIosTopTabCapsuleContainerColor(
+    isDarkTheme: Boolean,
+    selectionFraction: Float
+): Color {
+    val selectedAlpha = selectionFraction.coerceIn(0f, 1f)
+    val baseColor = if (isDarkTheme) {
+        Color(0xFFE5E5EA).copy(alpha = 0.20f)
+    } else {
+        Color(0xFFF2F2F7)
+    }
+    return baseColor.copy(alpha = baseColor.alpha * selectedAlpha)
+}
+
 internal fun Modifier.homeTopBottomBarMatchedSurface(
     renderMode: HomeTopChromeRenderMode,
     shape: Shape,
@@ -555,7 +610,9 @@ private fun LightweightHomeTopTabs(
     isFloatingStyle: Boolean,
     edgeToEdge: Boolean,
     skinPlainStyle: Boolean = false,
-    skinPlainContentColor: Color? = null
+    skinPlainContentColor: Color? = null,
+    topTabSkinIconPaths: Map<String, TopTabSkinIconPaths> = emptyMap(),
+    partitionSkinIconPath: String? = null
 ) {
     val uiPreset = LocalUiPreset.current
     val haptic = com.android.purebilibili.core.util.rememberHapticFeedback()
@@ -564,7 +621,7 @@ private fun LightweightHomeTopTabs(
     val showIcon = shouldShowTopTabIcon(normalizedLabelMode)
     val showText = shouldShowTopTabText(normalizedLabelMode)
     val effectiveRenderer = if (skinPlainStyle) HomeTopTabRenderer.MD3 else renderer
-    val rowHeight = if (skinPlainStyle) {
+    val baseRowHeight = if (skinPlainStyle) {
         resolveHomeSkinTopTabRowHeight()
     } else when (effectiveRenderer) {
         HomeTopTabRenderer.IOS -> resolveIosTopTabRowHeight(isFloatingStyle, normalizedLabelMode)
@@ -578,6 +635,13 @@ private fun LightweightHomeTopTabs(
             labelMode = normalizedLabelMode
         ).rowHeight
     }
+    val hasSkinStickerIcons = topTabSkinIconPaths.isNotEmpty() || !partitionSkinIconPath.isNullOrBlank()
+    val rowHeight = resolveTopTabSkinStickerRowHeight(
+        baseRowHeight = baseRowHeight,
+        hasSkinStickerIcons = hasSkinStickerIcons,
+        showIcon = showIcon,
+        showText = showText
+    )
     val actionButtonSize = if (skinPlainStyle) {
         resolveHomeSkinTopTabActionButtonSize()
     } else when (effectiveRenderer) {
@@ -609,6 +673,9 @@ private fun LightweightHomeTopTabs(
         )
     }
     val listState = rememberLazyListState()
+    var tabViewportLeftInWindowPx by remember { mutableFloatStateOf(Float.NaN) }
+    var selectedItemLeftInWindowPx by remember { mutableFloatStateOf(Float.NaN) }
+    val pagerIsDragging = rememberTopTabPagerDragHeld(pagerState)
     val currentPosition by remember(pagerState, selectedIndex) {
         derivedStateOf {
             resolveTopTabIndicatorRenderPosition(
@@ -620,8 +687,20 @@ private fun LightweightHomeTopTabs(
             )
         }
     }
+    val selectedContentPosition by remember(pagerState, selectedIndex) {
+        derivedStateOf {
+            resolveTopTabSelectedContentPosition(
+                selectedIndex = selectedIndex,
+                pagerCurrentPage = pagerState?.currentPage,
+                pagerTargetPage = pagerState?.targetPage,
+                pagerCurrentPageOffsetFraction = pagerState?.currentPageOffsetFraction,
+                pagerIsScrolling = pagerState?.isScrollInProgress == true
+            )
+        }
+    }
 
     LaunchedEffect(selectedIndex, categories.size) {
+        selectedItemLeftInWindowPx = Float.NaN
         if (categories.isNotEmpty()) {
             listState.animateScrollToItem(selectedIndex.coerceIn(0, categories.lastIndex))
         }
@@ -649,11 +728,20 @@ private fun LightweightHomeTopTabs(
             HomeTopTabRenderer.MIUIX -> resolveMd3TopTabItemWidthDp(maxWidth.value).dp
         }
         val density = LocalDensity.current
+        val isDarkTheme = isSystemInDarkTheme()
         val md3IndicatorWidth = if (skinPlainStyle) 30.dp else 28.dp
         val md3TopTabVerticalLiftPx = if (skinPlainStyle) {
             0f
         } else {
             with(density) { resolveMd3TopTabVerticalLiftDp().dp.toPx() }
+        }
+        val rowScrollOffsetPx by remember(itemWidth, density, listState) {
+            derivedStateOf {
+                with(density) {
+                    listState.firstVisibleItemIndex * itemWidth.toPx() +
+                        listState.firstVisibleItemScrollOffset
+                }
+            }
         }
         val md3IndicatorTranslationXPx by remember(currentPosition, itemWidth, md3IndicatorWidth, density, listState) {
             derivedStateOf {
@@ -661,12 +749,66 @@ private fun LightweightHomeTopTabs(
                     resolveMd3TopTabIndicatorTranslationPx(
                         absolutePagerPosition = currentPosition,
                         itemWidthPx = itemWidth.toPx(),
-                        rowScrollOffsetPx = listState.firstVisibleItemIndex * itemWidth.toPx() +
-                            listState.firstVisibleItemScrollOffset,
+                        rowScrollOffsetPx = rowScrollOffsetPx,
                         indicatorWidthPx = md3IndicatorWidth.toPx()
                     )
                 }
             }
+        }
+        val shouldUseMovingIosCapsule = effectiveRenderer == HomeTopTabRenderer.IOS &&
+            !skinPlainStyle &&
+            !hasSkinStickerIcons
+        val measuredSelectedItemLeftPx by remember(shouldUseMovingIosCapsule) {
+            derivedStateOf {
+                if (!shouldUseMovingIosCapsule ||
+                    tabViewportLeftInWindowPx.isNaN() ||
+                    selectedItemLeftInWindowPx.isNaN()
+                ) {
+                    null
+                } else {
+                    selectedItemLeftInWindowPx - tabViewportLeftInWindowPx
+                }
+            }
+        }
+        val iosCapsuleTargetTranslationXPx by remember(
+            selectedContentPosition,
+            measuredSelectedItemLeftPx,
+            itemWidth,
+            density,
+            rowScrollOffsetPx,
+            pagerState,
+            pagerIsDragging
+        ) {
+            derivedStateOf {
+                val pagerIsScrolling = pagerState?.isScrollInProgress == true
+                with(density) {
+                    resolveIosTopTabCapsuleTargetTranslationPx(
+                        measuredSelectedItemLeftPx = measuredSelectedItemLeftPx,
+                        absolutePagerPosition = selectedContentPosition,
+                        itemWidthPx = itemWidth.toPx(),
+                        rowScrollOffsetPx = rowScrollOffsetPx,
+                        contentPaddingPx = 2.dp.toPx(),
+                        followPagerPosition = pagerIsDragging || pagerIsScrolling
+                    )
+                }
+            }
+        }
+        val shouldAnimateIosCapsule = shouldAnimateIosTopTabCapsule(
+            pagerIsDragging = pagerIsDragging,
+            pagerIsScrolling = pagerState?.isScrollInProgress == true
+        )
+        val animatedIosCapsuleTranslationXPx by animateFloatAsState(
+            targetValue = iosCapsuleTargetTranslationXPx,
+            animationSpec = spring(
+                dampingRatio = 0.68f,
+                stiffness = Spring.StiffnessMediumLow
+            ),
+            label = "iosTopTabCapsuleTranslation"
+        )
+        val iosCapsuleTranslationXPx = if (shouldAnimateIosCapsule) {
+            animatedIosCapsuleTranslationXPx
+        } else {
+            iosCapsuleTargetTranslationXPx
         }
         Row(
             modifier = Modifier
@@ -684,7 +826,31 @@ private fun LightweightHomeTopTabs(
                 modifier = Modifier
                     .weight(1f)
                     .fillMaxHeight()
+                    .onGloballyPositioned { coordinates ->
+                        tabViewportLeftInWindowPx = coordinates.boundsInWindow().left
+                    }
             ) {
+                if (shouldUseMovingIosCapsule) {
+                    val capsuleShape = resolveSharedBottomBarCapsuleShape()
+                    Box(
+                        modifier = Modifier
+                            .align(Alignment.CenterStart)
+                            .graphicsLayer {
+                                translationX = iosCapsuleTranslationXPx
+                            }
+                            .width(itemWidth)
+                            .fillMaxHeight()
+                            .padding(horizontal = 3.dp, vertical = 4.dp)
+                            .clip(capsuleShape)
+                            .background(
+                                resolveIosTopTabCapsuleContainerColor(
+                                    isDarkTheme = isDarkTheme,
+                                    selectionFraction = 1f
+                                ),
+                                capsuleShape
+                            )
+                    )
+                }
                 LazyRow(
                     state = listState,
                     modifier = Modifier.fillMaxSize(),
@@ -697,7 +863,24 @@ private fun LightweightHomeTopTabs(
                         key = { index, category -> categoryKeys.getOrNull(index) ?: category }
                     ) { index, category ->
                         val categoryKey = categoryKeys.getOrNull(index) ?: category
-                        val selectionFraction = (1f - abs(currentPosition - index.toFloat())).coerceIn(0f, 1f)
+                        val contentPosition = if (effectiveRenderer == HomeTopTabRenderer.IOS) {
+                            selectedContentPosition
+                        } else {
+                            currentPosition
+                        }
+                        val selectionFraction = (1f - abs(contentPosition - index.toFloat())).coerceIn(0f, 1f)
+                        val drawItemContainer = shouldDrawLightweightTopTabItemContainer(
+                            renderer = effectiveRenderer,
+                            skinPlainStyle = skinPlainStyle,
+                            hasSkinStickerIcon = hasSkinStickerIcons
+                        )
+                        val measuredItemModifier = if (shouldUseMovingIosCapsule && index == selectedIndex) {
+                            Modifier.onGloballyPositioned { coordinates ->
+                                selectedItemLeftInWindowPx = coordinates.boundsInWindow().left
+                            }
+                        } else {
+                            Modifier
+                        }
                         LightweightTopTabItem(
                             renderer = effectiveRenderer,
                             category = category,
@@ -710,6 +893,10 @@ private fun LightweightHomeTopTabs(
                             itemWidth = itemWidth,
                             skinPlainStyle = skinPlainStyle,
                             skinPlainContentColor = skinPlainContentColor,
+                            drawContainer = drawItemContainer,
+                            skinIconPaths = topTabSkinIconPaths[categoryKey.trim().uppercase()],
+                            hasSkinStickerIcon = hasSkinStickerIcons,
+                            modifier = measuredItemModifier,
                             onClick = {
                                 performHomeTopBarTap(haptic = haptic, onClick = {
                                     when (resolveTopTabClickAction(index, selectedIndex)) {
@@ -721,7 +908,7 @@ private fun LightweightHomeTopTabs(
                         )
                     }
                 }
-                if (effectiveRenderer == HomeTopTabRenderer.MD3) {
+                if (effectiveRenderer == HomeTopTabRenderer.MD3 && !hasSkinStickerIcons) {
                     val indicatorColor = if (skinPlainStyle && skinPlainContentColor != null) {
                         resolveHomeSkinTopTabIndicatorColor(skinPlainContentColor)
                     } else {
@@ -768,12 +955,21 @@ private fun LightweightHomeTopTabs(
                     },
                 contentAlignment = Alignment.Center
             ) {
-                Icon(
-                    resolveTopTabPartitionIcon(uiPreset),
-                    contentDescription = "浏览全部分区",
-                    tint = skinPlainContentColor ?: MaterialTheme.colorScheme.onSurfaceVariant,
-                    modifier = Modifier.size(actionIconSize)
-                )
+                if (!partitionSkinIconPath.isNullOrBlank()) {
+                    AsyncImage(
+                        model = File(partitionSkinIconPath),
+                        contentDescription = "浏览全部分区",
+                        contentScale = ContentScale.Fit,
+                        modifier = Modifier.size(resolveTopTabSkinPartitionIconSize())
+                    )
+                } else {
+                    Icon(
+                        resolveTopTabPartitionIcon(uiPreset),
+                        contentDescription = "浏览全部分区",
+                        tint = skinPlainContentColor ?: MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.size(actionIconSize)
+                    )
+                }
             }
 
             Spacer(modifier = Modifier.width(6.dp))
@@ -794,17 +990,23 @@ private fun LightweightTopTabItem(
     itemWidth: Dp,
     skinPlainStyle: Boolean = false,
     skinPlainContentColor: Color? = null,
+    drawContainer: Boolean = true,
+    skinIconPaths: TopTabSkinIconPaths? = null,
+    hasSkinStickerIcon: Boolean = false,
+    modifier: Modifier = Modifier,
     onClick: () -> Unit
 ) {
     val uiPreset = LocalUiPreset.current
     val colorScheme = MaterialTheme.colorScheme
-    val icon = resolveTopTabCategoryIcon(categoryKey, uiPreset)
+    val isDarkTheme = isSystemInDarkTheme()
     val selected = selectionFraction > 0.5f || index == selectedIndex
+    val skinIconPath = skinIconPaths?.pathFor(selected)
+    val icon = resolveTopTabCategoryIcon(categoryKey, uiPreset)
     val selectedColor = when (renderer) {
         HomeTopTabRenderer.IOS -> if (skinPlainStyle) {
             skinPlainContentColor ?: colorScheme.onSurface
         } else {
-            colorScheme.primary
+            resolveIosTopTabSelectedContentColor(colorScheme)
         }
         HomeTopTabRenderer.MD3 -> if (skinPlainStyle) {
             skinPlainContentColor ?: colorScheme.onSurface
@@ -828,8 +1030,12 @@ private fun LightweightTopTabItem(
         selectionFraction
     )
     val containerColor = when {
+        !drawContainer -> Color.Transparent
         skinPlainStyle -> Color.Transparent
-        renderer == HomeTopTabRenderer.IOS -> colorScheme.primary.copy(alpha = 0.10f * selectionFraction)
+        renderer == HomeTopTabRenderer.IOS -> resolveIosTopTabCapsuleContainerColor(
+            isDarkTheme = isDarkTheme,
+            selectionFraction = selectionFraction
+        )
         renderer == HomeTopTabRenderer.MD3 -> Color.Transparent
         else -> colorScheme.secondaryContainer.copy(alpha = 0.70f * selectionFraction)
     }
@@ -841,10 +1047,17 @@ private fun LightweightTopTabItem(
     }
 
     Box(
-        modifier = Modifier
+        modifier = modifier
             .width(itemWidth)
             .fillMaxHeight()
-            .padding(horizontal = 3.dp, vertical = 4.dp)
+            .padding(
+                horizontal = 3.dp,
+                vertical = if (hasSkinStickerIcon) {
+                    resolveTopTabSkinStickerItemVerticalPadding(showText = showText)
+                } else {
+                    4.dp
+                }
+            )
             .clip(itemShape)
             .background(containerColor, itemShape)
             .clickable(
@@ -862,12 +1075,21 @@ private fun LightweightTopTabItem(
             verticalArrangement = Arrangement.Center
         ) {
             if (showIcon) {
-                Icon(
-                    imageVector = icon,
-                    contentDescription = null,
-                    tint = contentColor,
-                    modifier = Modifier.size(resolveTopTabIconSizeDp(if (showText) 0 else 1).dp)
-                )
+                if (!skinIconPath.isNullOrBlank()) {
+                    AsyncImage(
+                        model = File(skinIconPath),
+                        contentDescription = null,
+                        contentScale = ContentScale.Fit,
+                        modifier = Modifier.size(resolveTopTabSkinStickerIconSize(showText = showText))
+                    )
+                } else {
+                    Icon(
+                        imageVector = icon,
+                        contentDescription = null,
+                        tint = contentColor,
+                        modifier = Modifier.size(resolveTopTabIconSizeDp(if (showText) 0 else 1).dp)
+                    )
+                }
             }
             if (showIcon && showText) {
                 Spacer(modifier = Modifier.height(resolveTopTabIconTextSpacingDp(0).dp))
@@ -881,6 +1103,17 @@ private fun LightweightTopTabItem(
                     lineHeight = if (renderer == HomeTopTabRenderer.IOS) 17.sp else 20.sp,
                     fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Medium,
                     color = contentColor
+                )
+            }
+            if (hasSkinStickerIcon && showText) {
+                Spacer(modifier = Modifier.height(2.dp))
+                Box(
+                    modifier = Modifier
+                        .width(resolveTopTabSkinStickerIndicatorWidth())
+                        .height(2.dp)
+                        .clip(AppShapes.container(ContainerLevel.Pill))
+                        .background(selectedColor)
+                        .alpha(selectionFraction)
                 )
             }
         }
@@ -912,14 +1145,17 @@ fun CategoryTabRow(
     forceLowBlurBudget: Boolean = false,
     isViewportSyncEnabled: Boolean = true,
     skinPlainStyle: Boolean = false,
-    skinPlainContentColor: Color? = null
+    skinPlainContentColor: Color? = null,
+    topTabSkinIconPaths: Map<String, TopTabSkinIconPaths> = emptyMap(),
+    partitionSkinIconPath: String? = null
 ) {
     val presetStyle = resolveHomeTopPresetStyle(
         uiPreset = LocalUiPreset.current,
         androidNativeVariant = LocalAndroidNativeVariant.current,
         labelMode = labelMode
     )
-    if (!skinPlainStyle && presetStyle.renderer == HomeTopTabRenderer.MIUIX) {
+    val hasSkinStickerIcons = topTabSkinIconPaths.isNotEmpty() || !partitionSkinIconPath.isNullOrBlank()
+    if (!hasSkinStickerIcons && !skinPlainStyle && presetStyle.renderer == HomeTopTabRenderer.MIUIX) {
         val haptic = com.android.purebilibili.core.util.rememberHapticFeedback()
         val scrollChannel = com.android.purebilibili.feature.home.LocalHomeScrollChannel.current
         MiuixCategoryTabRow(
@@ -927,7 +1163,6 @@ fun CategoryTabRow(
             selectedIndex = selectedIndex,
             onCategorySelected = onCategorySelected,
             onPartitionClick = onPartitionClick,
-            pagerState = pagerState,
             haptic = haptic,
             scrollChannel = scrollChannel,
             presetStyle = presetStyle
@@ -946,7 +1181,9 @@ fun CategoryTabRow(
         isFloatingStyle = isFloatingStyle,
         edgeToEdge = edgeToEdge,
         skinPlainStyle = skinPlainStyle,
-        skinPlainContentColor = skinPlainContentColor
+        skinPlainContentColor = skinPlainContentColor,
+        topTabSkinIconPaths = topTabSkinIconPaths,
+        partitionSkinIconPath = partitionSkinIconPath
     )
 }
 
@@ -956,22 +1193,10 @@ private fun MiuixCategoryTabRow(
     selectedIndex: Int,
     onCategorySelected: (Int) -> Unit,
     onPartitionClick: () -> Unit,
-    pagerState: androidx.compose.foundation.pager.PagerState?,
     haptic: (HapticType) -> Unit,
     scrollChannel: kotlinx.coroutines.channels.Channel<Unit>?,
     presetStyle: HomeTopPresetStyle
 ) {
-    val selectedCategoryIndex by remember(pagerState, selectedIndex, categories.size) {
-        derivedStateOf {
-            resolveTopTabIndicatorRenderPosition(
-                selectedIndex = selectedIndex,
-                pagerCurrentPage = pagerState?.currentPage,
-                pagerTargetPage = pagerState?.targetPage,
-                pagerCurrentPageOffsetFraction = pagerState?.currentPageOffsetFraction,
-                pagerIsScrolling = pagerState?.isScrollInProgress == true
-            ).roundToInt().coerceIn(0, (categories.size - 1).coerceAtLeast(0))
-        }
-    }
     val visibleTabIndices = remember(categories.size, selectedIndex) {
         resolveMiuixVisibleTabIndices(
             totalCount = categories.size,
@@ -981,14 +1206,19 @@ private fun MiuixCategoryTabRow(
     val visibleCategories = remember(categories, visibleTabIndices) {
         visibleTabIndices.mapNotNull { index -> categories.getOrNull(index) }
     }
-    val selectedTabIndex = visibleTabIndices.indexOf(selectedCategoryIndex)
-        .takeIf { it >= 0 }
-        ?: 0
+    val selectedTabIndex = resolveMiuixSelectedVisibleIndex(
+        visibleIndices = visibleTabIndices,
+        selectedIndex = selectedIndex
+    )
     val topTabSpec = presetStyle.md3VisualSpec
     val actionButtonSize = presetStyle.actionButtonSizeDocked
     val actionButtonCorner = presetStyle.actionButtonCornerDocked
     val actionIconSize = presetStyle.actionIconSizeDocked
     val rowVerticalInset = resolveMiuixTopTabRowVerticalInset()
+    val rowHorizontalPadding = resolveMiuixTopTabRowHorizontalPadding()
+    val actionTrailingPadding = resolveMiuixTopTabActionTrailingPadding(
+        presetStyle.unifiedPanelInnerPadding
+    )
     val tabContentHeight = resolveMiuixTopTabContentHeight(topTabSpec.rowHeight)
     val tabRowColors = resolveMiuixTopTabRowColors(
         surfaceContainer = MiuixTheme.colorScheme.surfaceContainer,
@@ -1006,7 +1236,7 @@ private fun MiuixCategoryTabRow(
         modifier = Modifier
             .fillMaxWidth()
             .height(topTabSpec.rowHeight)
-            .padding(horizontal = 4.dp, vertical = rowVerticalInset),
+            .padding(horizontal = rowHorizontalPadding, vertical = rowVerticalInset),
         verticalAlignment = Alignment.CenterVertically
     ) {
         Box(
@@ -1074,7 +1304,7 @@ private fun MiuixCategoryTabRow(
             }
         }
 
-        Spacer(modifier = Modifier.width(8.dp))
+        Spacer(modifier = Modifier.width(actionTrailingPadding))
     }
 }
 

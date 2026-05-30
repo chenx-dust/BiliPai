@@ -1,5 +1,6 @@
 package com.android.purebilibili.feature.space
 
+import com.android.purebilibili.data.model.response.VideoSortOrder
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
@@ -175,5 +176,58 @@ class SpaceTabChromePolicyTest {
                 viewportWidthPx = 360f
             )
         )
+    }
+
+    @Test
+    fun `contribution toolbar uses compact chrome and icon first actions on narrow phones`() {
+        val spec = resolveSpaceContributionToolbarSpec(
+            widthDp = 412,
+            selectedSubTab = SpaceSubTab.VIDEO,
+            tabCount = 2,
+            selectedTitle = "视频"
+        )
+
+        assertEquals(40, spec.tabHeightDp)
+        assertEquals(34, spec.tabIndicatorHeightDp)
+        assertEquals(40, spec.expandedTabRailHeightDp)
+        assertEquals(88, spec.collapsedTabWidthDp)
+        assertTrue(spec.showVideoActions)
+        assertFalse(spec.showTotalText)
+        assertFalse(spec.showPlayAllText)
+        assertFalse(spec.showSortText)
+        assertTrue(spec.collapseAfterTabSelection)
+    }
+
+    @Test
+    fun `contribution toolbar hides video actions for article tabs`() {
+        val spec = resolveSpaceContributionToolbarSpec(
+            widthDp = 412,
+            selectedSubTab = SpaceSubTab.ARTICLE,
+            tabCount = 2
+        )
+
+        assertFalse(spec.showVideoActions)
+        assertFalse(spec.showPlayAllText)
+        assertFalse(spec.showSortText)
+    }
+
+    @Test
+    fun `collapsed contribution tab width stays compact for short and long titles`() {
+        assertEquals(88, resolveSpaceContributionCollapsedTabWidthDp("视频", widthDp = 412))
+        assertEquals(104, resolveSpaceContributionCollapsedTabWidthDp("season_video", widthDp = 412))
+        assertEquals(156, resolveSpaceContributionCollapsedTabWidthDp("合集 · 美食对决合集视频", widthDp = 412))
+    }
+
+    @Test
+    fun `space video sort compact labels stay short`() {
+        VideoSortOrder.entries.forEach { order ->
+            val label = resolveSpaceVideoSortCompactLabel(order)
+
+            assertTrue(label.length <= 2)
+        }
+        assertEquals("最新", resolveSpaceVideoSortCompactLabel(VideoSortOrder.PUBDATE))
+        assertEquals("最早", resolveSpaceVideoSortCompactLabel(VideoSortOrder.OLDEST_PUBDATE))
+        assertEquals("播放", resolveSpaceVideoSortCompactLabel(VideoSortOrder.CLICK))
+        assertEquals("收藏", resolveSpaceVideoSortCompactLabel(VideoSortOrder.STOW))
     }
 }

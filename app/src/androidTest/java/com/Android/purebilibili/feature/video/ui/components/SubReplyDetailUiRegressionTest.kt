@@ -8,11 +8,13 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.test.assertIsDisplayed
+import androidx.compose.ui.test.click
 import androidx.compose.ui.test.hasTestTag
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.longClick
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
+import androidx.compose.ui.test.onRoot
 import androidx.compose.ui.test.performScrollToNode
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performTouchInput
@@ -144,6 +146,85 @@ class SubReplyDetailUiRegressionTest {
         composeTestRule
             .onNodeWithTag("${COMMENT_SUB_REPLY_PREVIEW_TAG_PREFIX}301")
             .performClick()
+
+        composeTestRule.runOnIdle {
+            assertEquals(100L, openedReplyId)
+        }
+    }
+
+    @Test
+    fun clickingRootCommentWithSubReplies_opensRootReplyDetail() {
+        var openedReplyId: Long? = null
+
+        composeTestRule.setContent {
+            MaterialTheme {
+                ReplyItemView(
+                    item = buildReplyWithPreview(),
+                    emoteMap = emptyMap(),
+                    onClick = {},
+                    onSubClick = { openedReplyId = it.rpid },
+                    onAvatarClick = {}
+                )
+            }
+        }
+
+        composeTestRule
+            .onRoot()
+            .performClick()
+
+        composeTestRule.runOnIdle {
+            assertEquals(100L, openedReplyId)
+        }
+    }
+
+    @Test
+    fun clickingRootCommentTextWithSubReplies_opensRootReplyDetail() {
+        var openedReplyId: Long? = null
+
+        composeTestRule.setContent {
+            MaterialTheme {
+                ReplyItemView(
+                    item = buildReplyWithPreview(),
+                    emoteMap = emptyMap(),
+                    onClick = {},
+                    onSubClick = { openedReplyId = it.rpid },
+                    onAvatarClick = {}
+                )
+            }
+        }
+
+        composeTestRule
+            .onNodeWithText("root")
+            .performTouchInput {
+                click(center)
+            }
+
+        composeTestRule.runOnIdle {
+            assertEquals(100L, openedReplyId)
+        }
+    }
+
+    @Test
+    fun clickingSubReplyPreviewText_opensRootReplyDetail() {
+        var openedReplyId: Long? = null
+
+        composeTestRule.setContent {
+            MaterialTheme {
+                ReplyItemView(
+                    item = buildReplyWithPreview(),
+                    emoteMap = emptyMap(),
+                    onClick = {},
+                    onSubClick = { openedReplyId = it.rpid },
+                    onAvatarClick = {}
+                )
+            }
+        }
+
+        composeTestRule
+            .onNodeWithText("PreviewReply: preview child reply")
+            .performTouchInput {
+                click(center)
+            }
 
         composeTestRule.runOnIdle {
             assertEquals(100L, openedReplyId)

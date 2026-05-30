@@ -229,6 +229,16 @@ class SponsorBlockPluginPolicyTest {
         assertEquals("今日空降助手已帮你节省 2 次，累计 1 分 05 秒", notification?.body)
     }
 
+    @Test
+    fun buildSponsorBlockTestNotification_doesNotRequireRealRecords() {
+        val notification = buildSponsorBlockTestNotification(
+            config = SponsorBlockConfig(dailySummaryNotificationPrefix = "今日空降助手已帮你节省")
+        )
+
+        assertEquals("空降助手测试通知", notification.title)
+        assertEquals("今日空降助手已帮你节省 1 次，累计 30 秒", notification.body)
+    }
+
     private fun sponsorSegment(
         uuid: String,
         startSeconds: Float,

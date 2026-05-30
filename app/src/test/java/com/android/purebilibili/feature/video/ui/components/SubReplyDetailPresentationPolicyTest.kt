@@ -12,6 +12,7 @@ import com.android.purebilibili.data.model.response.ReplySailingFan
 import com.android.purebilibili.data.model.response.ReplyUserSailing
 import com.android.purebilibili.feature.video.viewmodel.resolveSubReplyLoadedTotalCount
 import com.android.purebilibili.feature.video.viewmodel.resolveSubReplyRemoteTotalCount
+import java.io.File
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
@@ -22,6 +23,83 @@ class SubReplyDetailPresentationPolicyTest {
     @Test
     fun `section title should include current reply count`() {
         assertEquals("相关回复共14条", resolveSubReplyDetailSectionTitle(replyCount = 14))
+    }
+
+    @Test
+    fun `sub reply detail reveal motion staggers by hierarchy`() {
+        assertEquals(40, resolveSubReplyDetailRevealDelayMillis(levelIndex = 0))
+        assertEquals(95, resolveSubReplyDetailRevealDelayMillis(levelIndex = 1))
+        assertEquals(150, resolveSubReplyDetailRevealDelayMillis(levelIndex = 2))
+        assertEquals(360, resolveSubReplyDetailRevealDelayMillis(levelIndex = 20))
+    }
+
+    @Test
+    fun `sub reply target list index resolves root and child positions`() {
+        val replies = listOf(
+            ReplyItem(rpid = 20L),
+            ReplyItem(rpid = 30L)
+        )
+
+        assertEquals(
+            0,
+            resolveSubReplyTargetListIndex(
+                rootReplyId = 10L,
+                visibleReplies = replies,
+                targetReplyId = 10L
+            )
+        )
+        assertEquals(
+            2,
+            resolveSubReplyTargetListIndex(
+                rootReplyId = 10L,
+                visibleReplies = replies,
+                targetReplyId = 30L
+            )
+        )
+        assertEquals(
+            null,
+            resolveSubReplyTargetListIndex(
+                rootReplyId = 10L,
+                visibleReplies = replies,
+                targetReplyId = 99L
+            )
+        )
+    }
+
+    @Test
+    fun `sub reply detail reveal motion stays blur free`() {
+        val spec = resolveSubReplyDetailRevealSpec(levelIndex = 2)
+
+        assertEquals(150, spec.delayMillis)
+        assertEquals(300, spec.durationMillis)
+        assertEquals(0f, spec.initialBlurRadiusDp)
+        assertEquals(14, spec.initialOffsetDp)
+    }
+
+    @Test
+    fun `sub reply detail component does not apply compose blur`() {
+        val source = File("src/main/java/com/android/purebilibili/feature/video/ui/components/SubReplyDetailComponents.kt").readText()
+
+        assertFalse(source.contains(".blur("))
+        assertFalse(source.contains("getCommentSubReplyRevealBlurEnabled"))
+        assertFalse(source.contains("animateBounds"))
+    }
+
+    @Test
+    fun `sub reply detail list avoids per reply reveal wrappers and eager footer loading`() {
+        val source = File("src/main/java/com/android/purebilibili/feature/video/ui/components/SubReplyDetailComponents.kt").readText()
+
+        assertFalse(source.contains("revealKey = \"reply_"))
+        assertFalse(source.contains("LaunchedEffect(isLoading, isEnd)"))
+    }
+
+    @Test
+    fun `sub reply detail removes centered down arrow drag handle`() {
+        val source = File("src/main/java/com/android/purebilibili/feature/video/ui/components/SubReplyDetailComponents.kt").readText()
+
+        assertFalse(source.contains("SubReplyDismissDragHandle("))
+        assertFalse(source.contains("rememberAppChevronDownIcon"))
+        assertFalse(source.contains("contentDescription = \"下拉关闭楼中楼\""))
     }
 
     @Test

@@ -4,6 +4,7 @@ import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.booleanOrNull
 import kotlinx.serialization.json.contentOrNull
+import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import java.io.ByteArrayInputStream
@@ -18,7 +19,7 @@ private const val BILIBILI_SKIN_LICENSE_NOTE =
     "由用户本地 KimmyXYC/bilibili-skin 主题目录转换，输出包包含原存档/官方装扮素材；" +
         "仅供本地私用或在已获得授权时分享，不要将官方付费主题原图、角色立绘、图标原件或动效资源作为社区包分发。"
 private const val MAX_THEME_ENTRY_COUNT = 256
-private const val MAX_THEME_TOTAL_BYTES = 32 * 1024 * 1024
+private const val MAX_THEME_TOTAL_BYTES = 128 * 1024 * 1024
 
 enum class UiSkinImportSource {
     BP_SKIN,
@@ -188,7 +189,10 @@ object UiSkinImportPackageResolver {
         val properties = themeObject?.objectOrNull("properties")
             ?: dataObject?.objectOrNull("properties")
             ?: root.objectOrNull("properties")
+            ?: dataObject
+                ?.takeIf { it.looksLikeThemeProperties() }
             ?: themeObject
+                ?.takeIf { it.looksLikeThemeProperties() }
             ?: dataObject
             ?: JsonObject(emptyMap())
         val id = themeObject?.stringOrNull("item_id")
@@ -229,10 +233,13 @@ object UiSkinImportPackageResolver {
         val themeObject = root.resolveThemeObject()
         return themeObject?.stringOrNull("package_url")
             ?: themeObject?.stringOrNull("packageUrl")
+            ?: themeObject?.objectOrNull("properties")?.stringOrNull("package_url")
+            ?: themeObject?.objectOrNull("properties")?.stringOrNull("packageUrl")
             ?: dataObject?.stringOrNull("package_url")
             ?: dataObject?.stringOrNull("packageUrl")
             ?: root.stringOrNull("package_url")
             ?: root.stringOrNull("packageUrl")
+            ?: root.findStringDeep("package_url", "packageUrl")
     }
 
     private fun buildAssetBytes(packageEntries: Map<String, ByteArray>): Map<String, ByteArray> {
@@ -241,6 +248,32 @@ object UiSkinImportPackageResolver {
             assetBytes["assets/${path.substringAfterLast("/")}"] = bytes
         }
         firstExisting(packageEntries, "head_bg.jpg", "head_tab_bg.jpg", "side_bg.jpg")?.let { (path, bytes) ->
+            assetBytes["assets/${path.substringAfterLast("/")}"] = bytes
+        }
+        firstExisting(packageEntries, "head_tab_bg.jpg", "head_tab_bg.png")?.let { (path, bytes) ->
+            assetBytes["assets/${path.substringAfterLast("/")}"] = bytes
+        }
+        firstExisting(packageEntries, "side_bg.jpg", "side_bg.png")?.let { (path, bytes) ->
+            assetBytes["assets/${path.substringAfterLast("/")}"] = bytes
+        }
+        firstExisting(packageEntries, "head_myself_bg.jpg", "head_myself_bg.png")?.let { (path, bytes) ->
+            assetBytes["assets/${path.substringAfterLast("/")}"] = bytes
+        }
+        firstExisting(
+            packageEntries,
+            "head_myself_squared_bg.jpg",
+            "head_myself_squared_bg.png"
+        )?.let { (path, bytes) ->
+            assetBytes["assets/${path.substringAfterLast("/")}"] = bytes
+        }
+        firstExisting(packageEntries, "tail_icon_channel.png", "tail_icon_channel.jpg")?.let { (path, bytes) ->
+            assetBytes["assets/${path.substringAfterLast("/")}"] = bytes
+        }
+        firstExisting(
+            packageEntries,
+            "tail_icon_selected_channel.png",
+            "tail_icon_selected_channel.jpg"
+        )?.let { (path, bytes) ->
             assetBytes["assets/${path.substringAfterLast("/")}"] = bytes
         }
         iconMapping.forEach { (packageStem, _) ->
@@ -287,7 +320,30 @@ object UiSkinImportPackageResolver {
                         it.endsWith("side_bg_bottom.jpg")
                 },
                 topAtmosphere = assetPaths.firstOrNull {
-                    it.endsWith("head_bg.jpg") || it.endsWith("head_tab_bg.jpg") || it.endsWith("side_bg.jpg")
+                    it.endsWith("head_bg.jpg") || it.endsWith("head_tab_bg.jpg")
+                },
+                homeTopTabBackground = assetPaths.firstOrNull {
+                    it.endsWith("head_tab_bg.jpg") || it.endsWith("head_tab_bg.png")
+                }?.takeUnless { path ->
+                    path == assetPaths.firstOrNull {
+                        it.endsWith("head_bg.jpg") || it.endsWith("head_tab_bg.jpg")
+                    }
+                },
+                homeSideBackground = assetPaths.firstOrNull {
+                    it.endsWith("side_bg.jpg") || it.endsWith("side_bg.png")
+                },
+                homeProfileBackground = assetPaths.firstOrNull {
+                    it.endsWith("head_myself_bg.jpg") || it.endsWith("head_myself_bg.png")
+                },
+                homeProfileSquaredBackground = assetPaths.firstOrNull {
+                    it.endsWith("head_myself_squared_bg.jpg") || it.endsWith("head_myself_squared_bg.png")
+                },
+                homeChannelIcon = assetPaths.firstOrNull {
+                    it.endsWith("tail_icon_channel.png") || it.endsWith("tail_icon_channel.jpg")
+                },
+                homeChannelSelectedIcon = assetPaths.firstOrNull {
+                    it.endsWith("tail_icon_selected_channel.png") ||
+                        it.endsWith("tail_icon_selected_channel.jpg")
                 },
                 bottomBarIcons = iconPaths
             ),
@@ -397,9 +453,63 @@ object UiSkinImportPackageResolver {
 
     private fun JsonObject.resolveThemeObject(): JsonObject? {
         val dataObject = objectOrNull("data")
-        return dataObject?.objectOrNull("user_equip")
-            ?: objectOrNull("user_equip")
-            ?: dataObject
+        val knownCandidates = listOfNotNull(
+            dataObject?.objectOrNull("user_equip"),
+            objectOrNull("user_equip"),
+            dataObject?.objectOrNull("skin_suit")?.objectOrNull("item"),
+            objectOrNull("skin_suit")?.objectOrNull("item"),
+            dataObject?.objectOrNull("item"),
+            objectOrNull("item"),
+            dataObject?.objectOrNull("skin_suit"),
+            objectOrNull("skin_suit"),
+            dataObject
+        )
+        return knownCandidates.firstOrNull { it.looksLikeThemeObject() }
+            ?: findObjectDeep { it.looksLikeThemeObject() }
+    }
+
+    private fun JsonObject.looksLikeThemeObject(): Boolean {
+        return stringOrNull("item_id") != null ||
+            stringOrNull("id") != null ||
+            stringOrNull("name") != null ||
+            objectOrNull("properties") != null
+    }
+
+    private fun JsonObject.looksLikeThemeProperties(): Boolean {
+        return stringOrNull("color") != null ||
+            stringOrNull("color_second_page") != null ||
+            stringOrNull("tail_color") != null ||
+            stringOrNull("ver") != null ||
+            stringOrNull("package_url") != null ||
+            stringOrNull("packageUrl") != null
+    }
+
+    private fun JsonObject.findStringDeep(vararg keys: String): String? {
+        keys.forEach { key ->
+            stringOrNull(key)?.let { return it }
+        }
+        values.forEach { value ->
+            when (value) {
+                is JsonObject -> value.findStringDeep(*keys)?.let { return it }
+                else -> runCatching { value.jsonArray }.getOrNull()?.forEach { item ->
+                    (item as? JsonObject)?.findStringDeep(*keys)?.let { return it }
+                }
+            }
+        }
+        return null
+    }
+
+    private fun JsonObject.findObjectDeep(predicate: (JsonObject) -> Boolean): JsonObject? {
+        if (predicate(this)) return this
+        values.forEach { value ->
+            when (value) {
+                is JsonObject -> value.findObjectDeep(predicate)?.let { return it }
+                else -> runCatching { value.jsonArray }.getOrNull()?.forEach { item ->
+                    (item as? JsonObject)?.findObjectDeep(predicate)?.let { return it }
+                }
+            }
+        }
+        return null
     }
 
     private fun String.parentName(): String {

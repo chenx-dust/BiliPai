@@ -34,6 +34,7 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Shape
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.luminance  //  状态栏亮度计算
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.zIndex
@@ -54,6 +55,7 @@ import com.android.purebilibili.core.util.iOSTapEffect
 import com.android.purebilibili.core.util.rememberHapticFeedback
 import com.android.purebilibili.feature.home.UserState
 import com.android.purebilibili.core.theme.iOSSystemGray
+import com.android.purebilibili.core.theme.iOSRed
 import com.android.purebilibili.core.store.LiquidGlassStyle
 import dev.chrisbanes.haze.HazeState
 import com.android.purebilibili.core.ui.blur.shouldAllowDirectHazeLiquidGlassFallback
@@ -64,14 +66,17 @@ import com.android.purebilibili.core.ui.blur.BlurStyles
 import com.android.purebilibili.core.ui.blur.BlurIntensity
 import com.android.purebilibili.core.ui.blur.currentUnifiedBlurIntensity
 import com.android.purebilibili.core.ui.blur.BlurSurfaceType
+import com.android.purebilibili.core.ui.effect.liquidGlassBackground
 import com.android.purebilibili.core.ui.adaptive.MotionTier
 import com.android.purebilibili.core.ui.AppShapes
 import com.android.purebilibili.core.ui.AppSurfaceTokens
 import com.android.purebilibili.core.ui.ContainerLevel
 import com.android.purebilibili.core.ui.motion.AppMotionTokens
+import com.android.purebilibili.core.ui.rememberAppInboxIcon
 import com.android.purebilibili.core.ui.rememberAppSettingsIcon
 import com.android.purebilibili.core.store.HomeHeaderBlurMode
 import com.android.purebilibili.core.store.HomeSettings
+import com.android.purebilibili.core.store.HomeTopRightAction
 import com.android.purebilibili.core.store.resolveEffectiveLiquidGlassEnabled
 import com.android.purebilibili.feature.home.resolveHomeTopCategories
 import com.android.purebilibili.feature.home.resolveHomeTopCollapsedHandleHeight
@@ -86,7 +91,14 @@ import com.android.purebilibili.core.theme.AndroidNativeVariant
 import com.android.purebilibili.core.theme.LocalAndroidNativeVariant
 import com.android.purebilibili.core.theme.LocalUiPreset
 import com.android.purebilibili.core.theme.UiPreset
+import com.android.purebilibili.feature.home.LocalHomeScrollOffset
 import com.android.purebilibili.navigation.resolveAppNavigationAppearance
+import com.kyant.backdrop.drawBackdrop
+import com.kyant.backdrop.effects.blur
+import com.kyant.backdrop.effects.lens
+import dev.chrisbanes.haze.HazeStyle
+import dev.chrisbanes.haze.hazeEffect
+import java.io.File
 
 private const val HOME_HEADER_LIQUID_GLASS_ALPHA = 0.10f
 
@@ -142,7 +154,7 @@ internal fun resolveHomeSkinTopTabUnselectedContentColor(contentColor: Color): C
     contentColor.copy(alpha = if (contentColor.luminance() > 0.5f) 0.84f else 0.78f)
 
 internal fun shouldUseHomeSkinPlainTopTabs(uiSkinDecoration: HomeUiSkinDecoration?): Boolean =
-    uiSkinDecoration != null
+    false
 
 internal fun resolveHomeSkinTopTabIndicatorColor(contentColor: Color): Color =
     contentColor.copy(alpha = maxOf(contentColor.alpha, 0.92f))
@@ -181,6 +193,50 @@ internal fun resolveHomeTopLinkedBottomBarAppearance(
             androidNativeLiquidGlassEnabled = resolvedHomeSettings.androidNativeLiquidGlassEnabled
         )
     )
+}
+
+internal fun formatHomeTopRightUnreadBadge(
+    action: HomeTopRightAction,
+    unreadCount: Int
+): String? {
+    if (action != HomeTopRightAction.INBOX || unreadCount <= 0) return null
+    return if (unreadCount > 99) "99+" else unreadCount.toString()
+}
+
+internal data class HomeTopRightUnreadBadgeLayout(
+    val offsetX: Dp,
+    val offsetY: Dp,
+    val reservedEndWidth: Dp,
+    val minWidth: Dp,
+    val minHeight: Dp,
+    val horizontalPadding: Dp,
+    val verticalPadding: Dp
+)
+
+internal fun resolveHomeTopRightUnreadBadgeLayout(): HomeTopRightUnreadBadgeLayout {
+    return HomeTopRightUnreadBadgeLayout(
+        offsetX = 0.dp,
+        offsetY = 0.dp,
+        reservedEndWidth = 9.dp,
+        minWidth = 18.dp,
+        minHeight = 18.dp,
+        horizontalPadding = 5.dp,
+        verticalPadding = 1.dp
+    )
+}
+
+internal fun resolveHomeTopRightActionSlotWidth(
+    buttonSize: Dp,
+    badgeLayout: HomeTopRightUnreadBadgeLayout,
+    hasUnreadBadge: Boolean
+): Dp = if (hasUnreadBadge) buttonSize + badgeLayout.reservedEndWidth else buttonSize
+
+internal fun resolveHomeTopRightActionContentDescription(
+    action: HomeTopRightAction,
+    unreadCount: Int
+): String {
+    val badgeText = formatHomeTopRightUnreadBadge(action, unreadCount) ?: return action.label
+    return "${action.label}，$badgeText 条未读"
 }
 
 internal fun resolveHomeTopChromeLiquidGlassEnabled(
@@ -485,11 +541,29 @@ internal fun resolveHomeTopEdgeButtonShape(
 
 internal fun resolveHomeTopAvatarOuterSize(): Dp = 40.dp
 
-internal fun resolveHomeTopAvatarInnerSize(): Dp = resolveHomeTopSettingsButtonSize()
+internal fun resolveHomeTopAvatarInnerSize(): Dp = 40.dp
 
-internal fun resolveHomeTopSettingsButtonSize(): Dp = 40.dp
+internal fun resolveHomeTopSettingsButtonSize(
+    uiPreset: UiPreset = UiPreset.IOS,
+    androidNativeVariant: AndroidNativeVariant = AndroidNativeVariant.MATERIAL3
+): Dp {
+    return if (uiPreset == UiPreset.MD3 && androidNativeVariant == AndroidNativeVariant.MIUIX) {
+        resolveHomeTopPresetStyle(uiPreset, androidNativeVariant, labelMode = 2).actionButtonSizeDocked
+    } else {
+        40.dp
+    }
+}
 
-internal fun resolveHomeTopSettingsIconSize(): Dp = 20.dp
+internal fun resolveHomeTopSettingsIconSize(
+    uiPreset: UiPreset = UiPreset.IOS,
+    androidNativeVariant: AndroidNativeVariant = AndroidNativeVariant.MATERIAL3
+): Dp {
+    return if (uiPreset == UiPreset.MD3 && androidNativeVariant == AndroidNativeVariant.MIUIX) {
+        resolveHomeTopPresetStyle(uiPreset, androidNativeVariant, labelMode = 2).actionIconSizeDocked
+    } else {
+        20.dp
+    }
+}
 
 internal fun resolveHomeTopEdgeControlGap(
     uiPreset: UiPreset = UiPreset.IOS,
@@ -541,6 +615,13 @@ internal fun resolveHomeTopUnifiedPanelCornerRadius(
 ): Dp {
     if (collapsedIntoStatusBar) return 0.dp
     return resolveHomeTopPresetStyle(uiPreset, androidNativeVariant, labelMode = 2).unifiedPanelCornerRadius
+}
+
+internal fun resolveHomeTopReservedContentBottomGap(
+    uiPreset: UiPreset = UiPreset.IOS,
+    androidNativeVariant: AndroidNativeVariant = AndroidNativeVariant.MATERIAL3
+): Dp {
+    return resolveHomeTopPresetStyle(uiPreset, androidNativeVariant, labelMode = 2).reservedContentBottomGap
 }
 
 internal fun resolveHomeTopEmbeddedTabHorizontalPadding(uiPreset: UiPreset = UiPreset.IOS): Dp {
@@ -619,7 +700,7 @@ internal fun resolveHomeTopReservedListPadding(
             tabRowHeight +
             (resolveHomeTopUnifiedPanelInnerPadding(uiPreset, androidNativeVariant) * 2) +
             resolveHomeTopSearchToTabsSpacing(uiPreset, androidNativeVariant) +
-            5.dp
+            resolveHomeTopReservedContentBottomGap(uiPreset, androidNativeVariant)
     } else {
         searchBarHeight + resolveHomeTopSearchToTabsSpacing(uiPreset, androidNativeVariant) + tabRowHeight
     }
@@ -1159,6 +1240,69 @@ internal fun resolveHomeTopChromeLensShape(shape: Shape): Shape? {
     }
 }
 
+private data class HomeTopChromeSurfaceStyle(
+    val blurSurfaceType: BlurSurfaceType,
+    val preferFlatGlass: Boolean,
+    val depthEffect: Boolean,
+    val refractionAmountScrollMultiplier: Float,
+    val refractionAmountScrollCap: Float,
+    val surfaceAlphaScrollMultiplier: Float,
+    val surfaceAlphaScrollCap: Float,
+    val darkThemeWhiteOverlayMultiplier: Float,
+    val useTuningSurfaceAlpha: Boolean,
+    val hazeBackgroundAlphaMultiplier: Float
+)
+
+private data class HomeTopChromeBackdropSpec(
+    val refractionAmount: Float,
+    val surfaceAlpha: Float,
+    val whiteOverlayAlpha: Float
+)
+
+private fun resolveHomeTopChromeBackdropSpec(
+    tuning: LiquidGlassTuning,
+    scrollOffset: Float,
+    isDarkTheme: Boolean,
+    style: HomeTopChromeSurfaceStyle
+): HomeTopChromeBackdropSpec {
+    val refractionAmount = if (tuning.scrollCoupledRefractionAmount > 0f) {
+        tuning.refractionAmount + (
+            scrollOffset * style.refractionAmountScrollMultiplier * tuning.scrollCoupledRefractionAmount
+        ).coerceIn(0f, style.refractionAmountScrollCap * tuning.scrollCoupledRefractionAmount)
+    } else {
+        tuning.refractionAmount
+    }
+    val surfaceAlpha = if (tuning.scrollCoupledRefractionAmount > 0f) {
+        tuning.surfaceAlpha + (
+            scrollOffset * style.surfaceAlphaScrollMultiplier * tuning.scrollCoupledRefractionAmount
+        ).coerceIn(0f, style.surfaceAlphaScrollCap * tuning.scrollCoupledRefractionAmount)
+    } else {
+        tuning.surfaceAlpha
+    }
+    val whiteOverlayAlpha = if (isDarkTheme) {
+        tuning.whiteOverlayAlpha * style.darkThemeWhiteOverlayMultiplier
+    } else {
+        tuning.whiteOverlayAlpha
+    }
+    return HomeTopChromeBackdropSpec(
+        refractionAmount = refractionAmount,
+        surfaceAlpha = surfaceAlpha,
+        whiteOverlayAlpha = whiteOverlayAlpha
+    )
+}
+
+private fun resolveHomeTopChromeSurfaceColor(
+    surfaceColor: Color,
+    backdropSpec: HomeTopChromeBackdropSpec,
+    style: HomeTopChromeSurfaceStyle
+): Color {
+    return if (style.useTuningSurfaceAlpha) {
+        surfaceColor.copy(alpha = backdropSpec.surfaceAlpha)
+    } else {
+        surfaceColor
+    }
+}
+
 internal fun Modifier.homeTopChromeSurface(
     renderMode: HomeTopChromeRenderMode,
     shape: Shape,
@@ -1174,74 +1318,170 @@ internal fun Modifier.homeTopChromeSurface(
     preferFlatGlass: Boolean = false,
     darkThemeWhiteOverlayMultiplier: Float = 0.86f
 ): Modifier = composed {
-    this.appChromeLiquidSurface(
-        renderMode = renderMode,
-        shape = shape,
-        surfaceColor = surfaceColor,
-        hazeState = hazeState,
-        backdrop = backdrop,
-        liquidStyle = liquidStyle,
-        liquidGlassTuning = liquidGlassTuning,
-        motionTier = motionTier,
-        isScrolling = isScrolling,
-        isTransitionRunning = isTransitionRunning,
-        forceLowBlurBudget = forceLowBlurBudget,
-        style = AppChromeLiquidSurfaceStyle(
-            blurSurfaceType = resolveHomeTopBlurSurfaceType(renderMode),
-            preferFlatGlass = preferFlatGlass,
-            depthEffect = liquidGlassTuning?.depthEffectEnabled != false,
-            refractionAmountScrollMultiplier = if (
-                renderMode == HomeTopChromeRenderMode.LIQUID_GLASS_BACKDROP ||
-                renderMode == HomeTopChromeRenderMode.LIQUID_GLASS_HAZE
-            ) {
-                0.016f
-            } else {
-                0f
-            },
-            refractionAmountScrollCap = if (
-                renderMode == HomeTopChromeRenderMode.LIQUID_GLASS_BACKDROP ||
-                renderMode == HomeTopChromeRenderMode.LIQUID_GLASS_HAZE
-            ) {
-                12f
-            } else {
-                0f
-            },
-            surfaceAlphaScrollMultiplier = if (
-                renderMode == HomeTopChromeRenderMode.LIQUID_GLASS_BACKDROP ||
-                renderMode == HomeTopChromeRenderMode.LIQUID_GLASS_HAZE
-            ) {
-                0.00012f
-            } else {
-                0f
-            },
-            surfaceAlphaScrollCap = if (
-                renderMode == HomeTopChromeRenderMode.LIQUID_GLASS_BACKDROP ||
-                renderMode == HomeTopChromeRenderMode.LIQUID_GLASS_HAZE
-            ) {
-                0.03f
-            } else {
-                0f
-            },
-            darkThemeWhiteOverlayMultiplier = if (
-                renderMode == HomeTopChromeRenderMode.LIQUID_GLASS_BACKDROP ||
-                renderMode == HomeTopChromeRenderMode.LIQUID_GLASS_HAZE
-            ) {
-                darkThemeWhiteOverlayMultiplier
-            } else {
-                1f
-            },
-            useTuningSurfaceAlpha = renderMode == HomeTopChromeRenderMode.LIQUID_GLASS_BACKDROP ||
-                renderMode == HomeTopChromeRenderMode.LIQUID_GLASS_HAZE,
-            hazeBackgroundAlphaMultiplier = if (
-                renderMode == HomeTopChromeRenderMode.LIQUID_GLASS_BACKDROP ||
-                renderMode == HomeTopChromeRenderMode.LIQUID_GLASS_HAZE
-            ) {
-                0.4f
-            } else {
-                1f
-            }
-        )
+    val isLiquidGlassMode = renderMode == HomeTopChromeRenderMode.LIQUID_GLASS_BACKDROP ||
+        renderMode == HomeTopChromeRenderMode.LIQUID_GLASS_HAZE
+    val scrollState = LocalHomeScrollOffset.current
+    val resolvedTuning = remember(liquidStyle, liquidGlassTuning) {
+        liquidGlassTuning ?: resolveLiquidGlassTuning(liquidStyle)
+    }
+    val style = HomeTopChromeSurfaceStyle(
+        blurSurfaceType = resolveHomeTopBlurSurfaceType(renderMode),
+        preferFlatGlass = preferFlatGlass,
+        depthEffect = liquidGlassTuning?.depthEffectEnabled != false,
+        refractionAmountScrollMultiplier = if (isLiquidGlassMode) 0.016f else 0f,
+        refractionAmountScrollCap = if (isLiquidGlassMode) 12f else 0f,
+        surfaceAlphaScrollMultiplier = if (isLiquidGlassMode) 0.00012f else 0f,
+        surfaceAlphaScrollCap = if (isLiquidGlassMode) 0.03f else 0f,
+        darkThemeWhiteOverlayMultiplier = if (isLiquidGlassMode) {
+            darkThemeWhiteOverlayMultiplier
+        } else {
+            1f
+        },
+        useTuningSurfaceAlpha = isLiquidGlassMode,
+        hazeBackgroundAlphaMultiplier = if (isLiquidGlassMode) 0.4f else 1f
     )
+    val lensShape = resolveHomeTopChromeLensShape(shape)
+    val surfaceTreatment = resolveHomeTopChromeSurfaceTreatment(
+        renderMode = renderMode,
+        preferFlatGlass = style.preferFlatGlass
+    )
+    val scrollOffset = scrollState.floatValue * resolvedTuning.scrollCoupledRefractionAmount
+    val backdropSpec = resolveHomeTopChromeBackdropSpec(
+        tuning = resolvedTuning,
+        scrollOffset = scrollOffset,
+        isDarkTheme = isSystemInDarkTheme(),
+        style = style
+    )
+    val resolvedSurfaceColor = resolveHomeTopChromeSurfaceColor(surfaceColor, backdropSpec, style)
+
+    when (renderMode) {
+        HomeTopChromeRenderMode.LIQUID_GLASS_BACKDROP -> {
+            if (surfaceTreatment == HomeTopChromeSurfaceTreatment.FLAT_GLASS && backdrop != null) {
+                this.drawBackdrop(
+                    backdrop = backdrop,
+                    shape = { lensShape ?: shape },
+                    effects = {
+                        blur(
+                            resolvedTuning.backdropBlurRadius *
+                                (0.08f + resolvedTuning.progress * 0.92f)
+                        )
+                    },
+                    onDrawSurface = {
+                        drawRect(resolvedSurfaceColor)
+                        drawRect(Color.White.copy(alpha = backdropSpec.whiteOverlayAlpha))
+                    }
+                )
+            } else if (backdrop != null && lensShape != null) {
+                this.drawBackdrop(
+                    backdrop = backdrop,
+                    shape = { lensShape },
+                    effects = {
+                        blur(
+                            resolvedTuning.backdropBlurRadius *
+                                (0.08f + resolvedTuning.progress * 0.92f)
+                        )
+                        if (backdropSpec.refractionAmount > 0.5f) {
+                            lens(
+                                refractionHeight = resolvedTuning.refractionHeight,
+                                refractionAmount = backdropSpec.refractionAmount,
+                                depthEffect = style.depthEffect && resolvedTuning.depthEffectEnabled,
+                                chromaticAberration = resolvedTuning.chromaticAberrationAmount > 0.01f
+                            )
+                        }
+                    },
+                    onDrawSurface = {
+                        drawRect(resolvedSurfaceColor)
+                        drawRect(Color.White.copy(alpha = backdropSpec.whiteOverlayAlpha))
+                    }
+                )
+            } else if (backdrop != null) {
+                this.drawBackdrop(
+                    backdrop = backdrop,
+                    shape = { shape },
+                    effects = {
+                        blur(
+                            resolvedTuning.backdropBlurRadius *
+                                (0.08f + resolvedTuning.progress * 0.92f)
+                        )
+                    },
+                    onDrawSurface = {
+                        drawRect(resolvedSurfaceColor)
+                        drawRect(Color.White.copy(alpha = backdropSpec.whiteOverlayAlpha))
+                    }
+                )
+            } else {
+                this.background(surfaceColor)
+            }
+        }
+
+        HomeTopChromeRenderMode.LIQUID_GLASS_HAZE -> {
+            if (hazeState != null) {
+                if (surfaceTreatment == HomeTopChromeSurfaceTreatment.FLAT_GLASS) {
+                    this
+                        .hazeEffect(
+                            state = hazeState,
+                            style = HazeStyle(
+                                tint = null,
+                                blurRadius = 0.1.dp,
+                                noiseFactor = 0f
+                            )
+                        ) {
+                            blurredEdgeTreatment = resolveUnifiedBlurredEdgeTreatment(shape)
+                        }
+                        .background(resolvedSurfaceColor)
+                } else {
+                    this
+                        .hazeEffect(
+                            state = hazeState,
+                            style = HazeStyle(
+                                tint = null,
+                                blurRadius = 0.1.dp,
+                                noiseFactor = 0f
+                            )
+                        ) {
+                            blurredEdgeTreatment = resolveUnifiedBlurredEdgeTreatment(shape)
+                        }
+                        .liquidGlassBackground(
+                            refractIntensity = resolvedTuning.refractIntensity,
+                            scrollOffsetProvider = { scrollOffset },
+                            backgroundColor = resolvedSurfaceColor.copy(
+                                alpha = if (style.useTuningSurfaceAlpha) {
+                                    backdropSpec.surfaceAlpha * style.hazeBackgroundAlphaMultiplier
+                                } else {
+                                    surfaceColor.alpha * style.hazeBackgroundAlphaMultiplier
+                                }
+                            )
+                        )
+                }
+            } else {
+                this.background(surfaceColor)
+            }
+        }
+
+        HomeTopChromeRenderMode.BLUR -> {
+            this
+                .then(
+                    if (hazeState != null) {
+                        Modifier.unifiedBlur(
+                            hazeState = hazeState,
+                            shape = shape,
+                            surfaceType = style.blurSurfaceType,
+                            motionTier = motionTier,
+                            isScrolling = isScrolling,
+                            isTransitionRunning = isTransitionRunning,
+                            forceLowBudget = forceLowBlurBudget
+                        )
+                    } else {
+                        Modifier
+                    }
+                )
+                .background(surfaceColor)
+        }
+
+        HomeTopChromeRenderMode.PLAIN -> {
+            this.background(surfaceColor)
+        }
+    }
 }
 
 /**
@@ -1257,6 +1497,8 @@ fun iOSHomeHeader(
     user: UserState,
     onAvatarClick: () -> Unit,
     onSettingsClick: () -> Unit,
+    onInboxClick: () -> Unit = {},
+    topRightUnreadCount: Int = 0,
     onSearchClick: () -> Unit,
     topCategories: List<String> = resolveHomeTopCategories().map { it.label },
     topCategoryKeys: List<String> = resolveHomeTopCategories().map { it.name },
@@ -1304,7 +1546,24 @@ fun iOSHomeHeader(
     val edgeButtonShape = resolveHomeTopEdgeButtonShape(uiPreset, androidNativeVariant)
     val searchContainerShape = resolveHomeTopSearchContainerShape(uiPreset, androidNativeVariant)
     val searchIcon = if (uiPreset == UiPreset.MD3) Icons.Outlined.Search else CupertinoIcons.Default.MagnifyingGlass
+    val topRightAction = homeSettings?.homeTopRightAction ?: HomeTopRightAction.SETTINGS
     val settingsIcon = rememberAppSettingsIcon()
+    val inboxIcon = rememberAppInboxIcon()
+    val topRightActionIcon = if (topRightAction == HomeTopRightAction.INBOX) inboxIcon else settingsIcon
+    val topRightActionContentDescription = resolveHomeTopRightActionContentDescription(
+        action = topRightAction,
+        unreadCount = topRightUnreadCount
+    )
+    val topRightUnreadBadge = formatHomeTopRightUnreadBadge(
+        action = topRightAction,
+        unreadCount = topRightUnreadCount
+    )
+    val topRightUnreadBadgeLayout = resolveHomeTopRightUnreadBadgeLayout()
+    val onTopRightActionClick = if (topRightAction == HomeTopRightAction.INBOX) {
+        onInboxClick
+    } else {
+        onSettingsClick
+    }
     val topChromeLiquidGlassEnabled = resolveHomeTopChromeLiquidGlassEnabled(
         homeSettings = homeSettings,
         uiPreset = uiPreset
@@ -1545,17 +1804,13 @@ fun iOSHomeHeader(
     val headerOffset by remember { derivedStateOf(headerOffsetProvider) }
     
     val searchBarHeightDp = resolveHomeTopSearchBarHeight(uiPreset, androidNativeVariant)
-    val tabRowHeightDp = if (shouldUseSkinPlainTopTabs) {
-        resolveHomeSkinTopTabRowHeight()
-    } else {
-        resolveHomeTopTabRowHeight(
-            isTabFloating = isTabFloating,
-            uiPreset = uiPreset,
-            androidNativeVariant = androidNativeVariant,
-            labelMode = homeSettings?.topTabLabelMode
-                ?: com.android.purebilibili.core.store.SettingsManager.TopTabLabelMode.TEXT_ONLY
-        )
-    }
+    val tabRowHeightDp = resolveHomeTopTabRowHeight(
+        isTabFloating = isTabFloating,
+        uiPreset = uiPreset,
+        androidNativeVariant = androidNativeVariant,
+        labelMode = homeSettings?.topTabLabelMode
+            ?: com.android.purebilibili.core.store.SettingsManager.TopTabLabelMode.TEXT_ONLY
+    )
     val searchCollapseDistanceDp = resolveHomeTopSearchCollapseDistance(
         searchBarHeight = searchBarHeightDp,
         uiPreset = uiPreset,
@@ -1697,14 +1952,12 @@ fun iOSHomeHeader(
         animationSpec = AppMotionTokens.standardSpec(),
         label = "tabContentAlpha"
     )
-    val effectiveContinuousSlabRenderMode = if (shouldUseSkinPlainTopTabs) {
-        HomeTopChromeRenderMode.PLAIN
-    } else if (integratedCollapsedTopBar) {
+    val effectiveContinuousSlabRenderMode = if (integratedCollapsedTopBar) {
         topPanelChromeRenderMode
     } else {
         continuousSlabRenderMode
     }
-    val effectiveTopPanelChromeRenderMode = if (shouldUseSkinPlainTopTabs || integratedCollapsedTopBar) {
+    val effectiveTopPanelChromeRenderMode = if (integratedCollapsedTopBar) {
         HomeTopChromeRenderMode.PLAIN
     } else {
         topPanelChromeRenderMode
@@ -1776,13 +2029,7 @@ fun iOSHomeHeader(
         tabContentAlpha = tabContentAlpha
     )
     val tabBorderAlpha = if (isTabFloating) tabChromeStyle.borderAlpha else 0f
-    val skinPlainTopTabContentColor = uiSkinDecoration?.let {
-        resolveHomeSkinTopTabContentColor(
-            topAtmosphereTint = it.topAtmosphereTint,
-            hasTopAtmosphereImage = !it.topAtmosphereImagePath.isNullOrBlank(),
-            darkTheme = isSystemInDarkTheme()
-        )
-    }
+    val topAtmosphereImagePath = uiSkinDecoration?.topAtmosphereImagePath
     val topTabsContent: @Composable () -> Unit = {
         HomeTopTabChrome(
             currentTabHeight = currentTabHeight,
@@ -1840,8 +2087,7 @@ fun iOSHomeHeader(
             gestureEnabled = topTabsVisible && !isHeaderCollapseEnabled,
             isTabsCollapsed = topTabsCollapsed,
             onTabsCollapsedChange = onTopTabsCollapsedChange,
-            drawChromeSurface = !shouldUseSkinPlainTopTabs &&
-                !useUnifiedTopPanel &&
+            drawChromeSurface = !useUnifiedTopPanel &&
                 drawTopTabOuterChromeSurface
         ) {
             CategoryTabRow(
@@ -1873,7 +2119,9 @@ fun iOSHomeHeader(
                 forceLowBlurBudget = forceLowBlurBudget,
                 isViewportSyncEnabled = isTopTabViewportSyncEnabled,
                 skinPlainStyle = shouldUseSkinPlainTopTabs,
-                skinPlainContentColor = skinPlainTopTabContentColor
+                skinPlainContentColor = null,
+                topTabSkinIconPaths = uiSkinDecoration?.topTabSkinIconPaths.orEmpty(),
+                partitionSkinIconPath = uiSkinDecoration?.topTabPartitionIconPath()
             )
         }
     }
@@ -1928,7 +2176,7 @@ fun iOSHomeHeader(
                     }
             )
 
-            // 2. Search Bar + Avatar + Settings
+                    // 2. Search Bar + Avatar + right action
             // 高度和透明度由外部直接控制，实现物理跟手
             Box(
                 modifier = Modifier
@@ -1976,6 +2224,30 @@ fun iOSHomeHeader(
                         }
                     )
             ) {
+                if (!topAtmosphereImagePath.isNullOrBlank()) {
+                    AsyncImage(
+                        model = File(topAtmosphereImagePath),
+                        contentDescription = null,
+                        contentScale = ContentScale.Crop,
+                        modifier = Modifier
+                            .matchParentSize()
+                            .alpha(0.30f)
+                            .clearAndSetSemantics {}
+                    )
+                    Box(
+                        modifier = Modifier
+                            .matchParentSize()
+                            .background(
+                                Brush.verticalGradient(
+                                    colors = listOf(
+                                        Color.Transparent,
+                                        headerChromeColors.containerColor.copy(alpha = 0.52f)
+                                    )
+                                )
+                            )
+                            .clearAndSetSemantics {}
+                    )
+                }
                 if (
                     drawUnifiedTopPanelChrome &&
                     useUnifiedTopPanel &&
@@ -2335,85 +2607,133 @@ fun iOSHomeHeader(
 
                             Spacer(modifier = Modifier.width(resolveHomeTopEdgeControlGap(uiPreset, androidNativeVariant)))
 
+                            val topRightActionButtonSize = resolveHomeTopSettingsButtonSize(uiPreset, androidNativeVariant)
                             Box(
                                 modifier = Modifier
-                                    .size(resolveHomeTopSettingsButtonSize())
-                                    .clip(edgeButtonShape)
-                                    .then(
-                                        if (useUnifiedTopPanel) {
-                                            if (useBottomBarMatchedTopControls) {
-                                                Modifier
-                                                    .homeTopBottomBarMatchedSurface(
-                                                        renderMode = localTopChromeRenderMode,
-                                                        shape = edgeButtonShape,
-                                                        hazeState = hazeState,
-                                                        backdrop = backdrop,
-                                                        liquidGlassStyle = liquidStyle,
-                                                        liquidGlassTuning = liquidGlassTuning,
-                                                        motionTier = motionTier,
-                                                        isTransitionRunning = topChromeMotionPolicy.isTransitionRunning,
-                                                        forceLowBlurBudget = forceLowBlurBudget,
-                                                        drawShellLens = false
-                                                    )
+                                    .fillMaxHeight()
+                                    .width(
+                                        resolveHomeTopRightActionSlotWidth(
+                                            buttonSize = topRightActionButtonSize,
+                                            badgeLayout = topRightUnreadBadgeLayout,
+                                            hasUnreadBadge = topRightUnreadBadge != null
+                                        )
+                                    )
+                            ) {
+                                Box(
+                                    modifier = Modifier
+                                        .align(Alignment.CenterStart)
+                                        .size(topRightActionButtonSize)
+                                        .clip(edgeButtonShape)
+                                        .then(
+                                            if (useUnifiedTopPanel) {
+                                                if (useBottomBarMatchedTopControls) {
+                                                    Modifier
+                                                        .homeTopBottomBarMatchedSurface(
+                                                            renderMode = localTopChromeRenderMode,
+                                                            shape = edgeButtonShape,
+                                                            hazeState = hazeState,
+                                                            backdrop = backdrop,
+                                                            liquidGlassStyle = liquidStyle,
+                                                            liquidGlassTuning = liquidGlassTuning,
+                                                            motionTier = motionTier,
+                                                            isTransitionRunning = topChromeMotionPolicy.isTransitionRunning,
+                                                            forceLowBlurBudget = forceLowBlurBudget,
+                                                            drawShellLens = false
+                                                        )
+                                                } else {
+                                                    Modifier
+                                                        .background(
+                                                            resolveHomeTopEdgeControlContainerColor(
+                                                                isLightMode = isLightMode,
+                                                                renderMode = localTopChromeRenderMode
+                                                            )
+                                                        )
+                                                        .border(
+                                                            width = 0.8.dp,
+                                                            color = resolveHomeTopEdgeControlBorderColor(
+                                                                isLightMode = isLightMode,
+                                                                renderMode = localTopChromeRenderMode
+                                                            ),
+                                                            shape = edgeButtonShape
+                                                        )
+                                                }
                                             } else {
                                                 Modifier
-                                                    .background(
-                                                        resolveHomeTopEdgeControlContainerColor(
-                                                            isLightMode = isLightMode,
-                                                            renderMode = localTopChromeRenderMode
-                                                        )
+                                                    .homeTopChromeSurface(
+                                                        renderMode = localTopChromeRenderMode,
+                                                        shape = edgeButtonShape,
+                                                        surfaceColor = headerChromeColors.containerColor,
+                                                        hazeState = hazeState,
+                                                        backdrop = backdrop,
+                                                        liquidStyle = liquidStyle,
+                                                        liquidGlassTuning = liquidGlassTuning,
+                                                        motionTier = motionTier,
+                                                        isScrolling = topChromeMotionPolicy.isScrolling,
+                                                        isTransitionRunning = topChromeMotionPolicy.isTransitionRunning,
+                                                        forceLowBlurBudget = forceLowBlurBudget
                                                     )
-                                                    .border(
-                                                        width = 0.8.dp,
-                                                        color = resolveHomeTopEdgeControlBorderColor(
-                                                            isLightMode = isLightMode,
-                                                            renderMode = localTopChromeRenderMode
-                                                        ),
-                                                        shape = edgeButtonShape
-                                                    )
+                                                    .border(0.8.dp, headerChromeColors.borderColor, edgeButtonShape)
                                             }
+                                        )
+                                        .then(
+                                            if (uiPreset == UiPreset.MD3) {
+                                                Modifier.clickable {
+                                                    performHomeTopBarTap(haptic = haptic, onClick = onTopRightActionClick)
+                                                }
+                                            } else {
+                                                Modifier.iOSTapEffect {
+                                                    haptic(HapticType.LIGHT)
+                                                    onTopRightActionClick()
+                                                }
+                                            }
+                                        ),
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    Icon(
+                                        topRightActionIcon,
+                                        contentDescription = topRightActionContentDescription,
+                                        tint = if (isLightMode) {
+                                            topForegroundColor
                                         } else {
-                                            Modifier
-                                                .homeTopChromeSurface(
-                                                    renderMode = localTopChromeRenderMode,
-                                                    shape = edgeButtonShape,
-                                                    surfaceColor = headerChromeColors.containerColor,
-                                                    hazeState = hazeState,
-                                                    backdrop = backdrop,
-                                                    liquidStyle = liquidStyle,
-                                                    liquidGlassTuning = liquidGlassTuning,
-                                                    motionTier = motionTier,
-                                                    isScrolling = topChromeMotionPolicy.isScrolling,
-                                                    isTransitionRunning = topChromeMotionPolicy.isTransitionRunning,
-                                                    forceLowBlurBudget = forceLowBlurBudget
-                                                )
-                                                .border(0.8.dp, headerChromeColors.borderColor, edgeButtonShape)
-                                        }
+                                            topForegroundColor.copy(alpha = topActionIconAlpha)
+                                        },
+                                        modifier = Modifier.size(resolveHomeTopSettingsIconSize(uiPreset, androidNativeVariant))
                                     )
-                                    .then(
-                                        if (uiPreset == UiPreset.MD3) {
-                                            Modifier.clickable {
-                                                performHomeTopBarTap(haptic = haptic, onClick = onSettingsClick)
-                                            }
-                                        } else {
-                                            Modifier.iOSTapEffect {
-                                                haptic(HapticType.LIGHT)
-                                                onSettingsClick()
-                                            }
-                                        }
-                                    ),
-                                contentAlignment = Alignment.Center
-                            ) {
-                                Icon(
-                                    settingsIcon,
-                                    contentDescription = "设置",
-                                    tint = if (isLightMode) {
-                                        topForegroundColor
-                                    } else {
-                                        topForegroundColor.copy(alpha = topActionIconAlpha)
-                                    },
-                                    modifier = Modifier.size(resolveHomeTopSettingsIconSize())
-                                )
+                                }
+                                if (topRightUnreadBadge != null) {
+                                    Box(
+                                        modifier = Modifier
+                                            .align(Alignment.TopEnd)
+                                            .offset(
+                                                x = topRightUnreadBadgeLayout.offsetX,
+                                                y = topRightUnreadBadgeLayout.offsetY
+                                            )
+                                            .defaultMinSize(
+                                                minWidth = topRightUnreadBadgeLayout.minWidth,
+                                                minHeight = topRightUnreadBadgeLayout.minHeight
+                                            )
+                                            .background(iOSRed, CircleShape)
+                                            .border(
+                                                width = 1.dp,
+                                                color = AppSurfaceTokens.cardContainer(),
+                                                shape = CircleShape
+                                            )
+                                            .padding(
+                                                horizontal = topRightUnreadBadgeLayout.horizontalPadding,
+                                                vertical = topRightUnreadBadgeLayout.verticalPadding
+                                            ),
+                                        contentAlignment = Alignment.Center
+                                    ) {
+                                        Text(
+                                            text = topRightUnreadBadge,
+                                            color = Color.White,
+                                            fontSize = 11.sp,
+                                            lineHeight = 12.sp,
+                                            fontWeight = FontWeight.SemiBold,
+                                            maxLines = 1
+                                        )
+                                    }
+                                }
                             }
                         }
                     }

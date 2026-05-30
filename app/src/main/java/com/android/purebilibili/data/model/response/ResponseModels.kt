@@ -246,6 +246,9 @@ data class ReplyMember(
 
     val vip: ReplyVipInfo? = null,
 
+    @SerialName("official_verify")
+    val officialVerify: OfficialVerify = OfficialVerify(),
+
     @SerialName("fans_detail")
     val fansDetail: ReplyFansDetail? = null,
 
@@ -630,5 +633,8 @@ data class ReplyControl(
     val isUpTop: Boolean = false,
     @Serializable(with = FlexibleBooleanSerializer::class)
     @SerialName("up_reply")
-    val upReply: Boolean = false
+    val upReply: Boolean = false,
+    @Serializable(with = FlexibleBooleanSerializer::class)
+    @SerialName("support_share")
+    val supportShare: Boolean = true
 )

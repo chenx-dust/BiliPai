@@ -33,9 +33,9 @@ class BottomBarUiSkinDecorationTest {
 
     @Test
     fun bottomSkinIconSizesMatchScreenshotLevelCharacterAssets() {
-        assertEquals(36.dp, resolveBottomBarSkinDockIconSize())
-        assertEquals(34.dp, resolveBottomBarMiuixSkinDockIconSize())
-        assertEquals(36.dp, resolveBottomBarCompactSkinHomeIconSize())
+        assertEquals(40.dp, resolveBottomBarSkinDockIconSize())
+        assertEquals(38.dp, resolveBottomBarMiuixSkinDockIconSize())
+        assertEquals(40.dp, resolveBottomBarCompactSkinHomeIconSize())
     }
 
     @Test
@@ -48,7 +48,7 @@ class BottomBarUiSkinDecorationTest {
             resolveBottomBarSkinDockHeight(),
             resolveMiuixDockedBottomBarItemHeight(hasUiSkinDecoration = true)
         )
-        assertEquals(36.dp, resolveBottomBarSkinDockIconSize())
+        assertEquals(40.dp, resolveBottomBarSkinDockIconSize())
         assertEquals(0.dp, padding.calculateTopPadding())
         assertEquals(0.dp, padding.calculateBottomPadding())
         assertEquals(2.dp, resolveBottomBarSkinIconLabelGap())
@@ -103,7 +103,9 @@ class BottomBarUiSkinDecorationTest {
                         "member" to "assets/tail_icon_shop.png",
                         "member_selected" to "assets/tail_icon_selected_shop.png",
                         "profile" to "assets/tail_icon_myself.png"
-                    )
+                    ),
+                    homeChannelIcon = "assets/tail_icon_channel.png",
+                    homeChannelSelectedIcon = "assets/tail_icon_selected_channel.png"
                 )
             ),
             packageSha256 = "sha",
@@ -116,7 +118,9 @@ class BottomBarUiSkinDecorationTest {
                 "assets/tail_icon_selected_dynamic.png" to "/tmp/tail_icon_selected_dynamic.png",
                 "assets/tail_icon_shop.png" to "/tmp/tail_icon_shop.png",
                 "assets/tail_icon_selected_shop.png" to "/tmp/tail_icon_selected_shop.png",
-                "assets/tail_icon_myself.png" to "/tmp/tail_icon_myself.png"
+                "assets/tail_icon_myself.png" to "/tmp/tail_icon_myself.png",
+                "assets/tail_icon_channel.png" to "/tmp/tail_icon_channel.png",
+                "assets/tail_icon_selected_channel.png" to "/tmp/tail_icon_selected_channel.png"
             )
         )
 
@@ -137,7 +141,56 @@ class BottomBarUiSkinDecorationTest {
             decoration?.iconPathFor(BottomNavItem.HISTORY, selected = true)
         )
         assertEquals("/tmp/tail_icon_myself.png", decoration?.iconPathFor(BottomNavItem.PROFILE))
+        assertEquals("/tmp/tail_icon_channel.png", decoration?.iconPathFor(BottomNavItem.SETTINGS))
+        assertEquals(
+            "/tmp/tail_icon_selected_channel.png",
+            decoration?.iconPathFor(BottomNavItem.SETTINGS, selected = true)
+        )
+        assertNull(decoration?.iconPathFor(BottomNavItem.STORY))
         assertNull(decoration?.iconPathFor(BottomNavItem.LIVE))
+    }
+
+    @Test
+    fun bottomSettingsSkinIconFallsBackWhenChannelAssetMissing() {
+        val installed = InstalledUiSkinPackage(
+            manifest = UiSkinManifest(
+                formatVersion = 1,
+                skinId = "dev.example.tail-icons",
+                displayName = "底栏图标",
+                version = "1.0.0",
+                apiVersion = 1,
+                surfaces = setOf(UiSkinSurface.HOME_BOTTOM_BAR),
+                assets = UiSkinAssets(
+                    bottomBarIcons = mapOf(
+                        "home" to "assets/tail_icon_main.png",
+                        "following" to "assets/tail_icon_dynamic.png",
+                        "member" to "assets/tail_icon_shop.png",
+                        "profile" to "assets/tail_icon_myself.png",
+                        "profile_selected" to "assets/tail_icon_selected_myself.png"
+                    )
+                )
+            ),
+            packageSha256 = "sha",
+            packagePath = "/tmp/tail-icons.bpskin",
+            installedAtMillis = 42L,
+            assetFiles = mapOf(
+                "assets/tail_icon_main.png" to "/tmp/tail_icon_main.png",
+                "assets/tail_icon_dynamic.png" to "/tmp/tail_icon_dynamic.png",
+                "assets/tail_icon_shop.png" to "/tmp/tail_icon_shop.png",
+                "assets/tail_icon_myself.png" to "/tmp/tail_icon_myself.png",
+                "assets/tail_icon_selected_myself.png" to "/tmp/tail_icon_selected_myself.png"
+            )
+        )
+
+        val decoration = resolveBottomBarUiSkinDecoration(
+            UiSkinState(enabled = true, activeSkin = installed)
+        )
+
+        assertEquals("/tmp/tail_icon_myself.png", decoration?.iconPathFor(BottomNavItem.SETTINGS))
+        assertEquals(
+            "/tmp/tail_icon_selected_myself.png",
+            decoration?.iconPathFor(BottomNavItem.SETTINGS, selected = true)
+        )
     }
 
     @Test
@@ -202,7 +255,24 @@ class BottomBarUiSkinDecorationTest {
                 version = "1.0.0",
                 apiVersion = 1,
                 surfaces = setOf(UiSkinSurface.HOME_TOP_CHROME),
-                assets = UiSkinAssets(topAtmosphere = "assets/head_bg.jpg"),
+                assets = UiSkinAssets(
+                    topAtmosphere = "assets/head_bg.jpg",
+                    homeTopTabBackground = "assets/head_tab_bg.jpg",
+                    homeSideBackground = "assets/side_bg.jpg",
+                    homeProfileBackground = "assets/head_myself_bg.jpg",
+                    homeProfileSquaredBackground = "assets/head_myself_squared_bg.jpg",
+                    homeChannelIcon = "assets/tail_icon_channel.png",
+                    homeChannelSelectedIcon = "assets/tail_icon_selected_channel.png",
+                    bottomBarIcons = mapOf(
+                        "home" to "assets/tail_icon_main.png",
+                        "home_selected" to "assets/tail_icon_selected_main.png",
+                        "following" to "assets/tail_icon_dynamic.png",
+                        "following_selected" to "assets/tail_icon_selected_dynamic.png",
+                        "member" to "assets/tail_icon_shop.png",
+                        "member_selected" to "assets/tail_icon_selected_shop.png",
+                        "profile" to "assets/tail_icon_myself.png"
+                    )
+                ),
                 colors = UiSkinColorTokens(
                     topAtmosphereTint = "#DFF5FF",
                     searchCapsuleTint = "#FFFFFF"
@@ -211,7 +281,22 @@ class BottomBarUiSkinDecorationTest {
             packageSha256 = "sha",
             packagePath = "/tmp/atmosphere.bpskin",
             installedAtMillis = 42L,
-            assetFiles = mapOf("assets/head_bg.jpg" to "/tmp/head_bg.jpg")
+            assetFiles = mapOf(
+                "assets/head_bg.jpg" to "/tmp/head_bg.jpg",
+                "assets/head_tab_bg.jpg" to "/tmp/head_tab_bg.jpg",
+                "assets/side_bg.jpg" to "/tmp/side_bg.jpg",
+                "assets/head_myself_bg.jpg" to "/tmp/head_myself_bg.jpg",
+                "assets/head_myself_squared_bg.jpg" to "/tmp/head_myself_squared_bg.jpg",
+                "assets/tail_icon_channel.png" to "/tmp/tail_icon_channel.png",
+                "assets/tail_icon_selected_channel.png" to "/tmp/tail_icon_selected_channel.png",
+                "assets/tail_icon_main.png" to "/tmp/tail_icon_main.png",
+                "assets/tail_icon_selected_main.png" to "/tmp/tail_icon_selected_main.png",
+                "assets/tail_icon_dynamic.png" to "/tmp/tail_icon_dynamic.png",
+                "assets/tail_icon_selected_dynamic.png" to "/tmp/tail_icon_selected_dynamic.png",
+                "assets/tail_icon_shop.png" to "/tmp/tail_icon_shop.png",
+                "assets/tail_icon_selected_shop.png" to "/tmp/tail_icon_selected_shop.png",
+                "assets/tail_icon_myself.png" to "/tmp/tail_icon_myself.png"
+            )
         )
 
         val decoration = resolveHomeUiSkinDecoration(
@@ -220,6 +305,16 @@ class BottomBarUiSkinDecorationTest {
 
         assertEquals("dev.example.atmosphere", decoration?.skinId)
         assertEquals("/tmp/head_bg.jpg", decoration?.topAtmosphereImagePath)
+        assertEquals("/tmp/head_tab_bg.jpg", decoration?.topTabBackgroundImagePath)
+        assertEquals("/tmp/side_bg.jpg", decoration?.sideBackgroundImagePath)
+        assertEquals("/tmp/head_myself_bg.jpg", decoration?.profileBackgroundImagePath)
+        assertEquals("/tmp/head_myself_squared_bg.jpg", decoration?.profileSquaredBackgroundImagePath)
+        assertEquals("/tmp/tail_icon_main.png", decoration?.topTabIconPathFor("RECOMMEND"))
+        assertEquals("/tmp/tail_icon_selected_main.png", decoration?.topTabIconPathFor("RECOMMEND", selected = true))
+        assertEquals("/tmp/tail_icon_dynamic.png", decoration?.topTabIconPathFor("FOLLOW"))
+        assertEquals("/tmp/tail_icon_channel.png", decoration?.topTabIconPathFor("POPULAR"))
+        assertEquals("/tmp/tail_icon_channel.png", decoration?.topTabPartitionIconPath())
+        assertEquals("/tmp/tail_icon_selected_channel.png", decoration?.topTabPartitionIconPath(selected = true))
     }
 
     @Test

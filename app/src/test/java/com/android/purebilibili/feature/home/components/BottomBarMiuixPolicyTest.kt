@@ -81,10 +81,10 @@ class BottomBarMiuixPolicyTest {
         assertTrue(source.contains("val tabsBackdrop = rememberLayerBackdrop()"))
         assertTrue(source.contains(".layerBackdrop(tabsBackdrop)"))
         assertTrue(source.contains("rememberCombinedBackdrop(backdrop, tabsBackdrop)"))
-        assertTrue(source.contains("refractionHeight = 24.dp.toPx()"))
-        assertTrue(source.contains("refractionAmount = 24.dp.toPx()"))
+        assertTrue(source.contains("refractionHeight = materialSpec.shellRefractionHeightDp.dp.toPx()"))
+        assertTrue(source.contains("refractionAmount = materialSpec.shellRefractionAmountDp.dp.toPx()"))
         assertTrue(source.contains("depthEffect = true"))
-        assertTrue(source.contains("chromaticAberration = true"))
+        assertTrue(source.contains("chromaticAberration = materialSpec.shellChromaticAberration"))
     }
 
     @Test
@@ -93,7 +93,7 @@ class BottomBarMiuixPolicyTest {
 
         assertTrue(
             Regex(
-                """rememberCombinedBackdrop\(backdrop, tabsBackdrop\)[\s\S]*?drawBackdrop\([\s\S]*?effects = \{[\s\S]*?lens\([\s\S]*?chromaticAberration = true""",
+                """rememberCombinedBackdrop\(backdrop, tabsBackdrop\)[\s\S]*?drawBackdrop\([\s\S]*?effects = \{[\s\S]*?lens\([\s\S]*?chromaticAberration = materialSpec\.shellChromaticAberration""",
                 RegexOption.MULTILINE
             ).containsMatchIn(source)
         )
@@ -105,20 +105,6 @@ class BottomBarMiuixPolicyTest {
 
         assertTrue(source.contains("if (backdrop != null && !useHazeBlur)"))
         assertTrue(source.contains("Modifier.unifiedBlur("))
-    }
-
-    @Test
-    fun `backdrop native preset keeps direct library effect chain`() {
-        val source = loadSource("app/src/main/java/com/android/purebilibili/feature/home/components/BottomBar.kt")
-
-        assertTrue(source.contains("BottomBarLiquidGlassPreset.BACKDROP_NATIVE"))
-        assertTrue(source.contains("resolveBottomBarBackdropNativeSurfaceSpec("))
-        assertTrue(
-            Regex(
-                """BottomBarLiquidGlassPreset\.BACKDROP_NATIVE[\s\S]*?drawBackdrop\([\s\S]*?effects = \{[\s\S]*?vibrancy\(\)[\s\S]*?blur\([\s\S]*?lens\(""",
-                RegexOption.MULTILINE
-            ).containsMatchIn(source)
-        )
     }
 
     private fun loadSource(path: String): String {

@@ -59,7 +59,7 @@ class DampedDragAnimationPolicyTest {
     }
 
     @Test
-    fun `drag updates snap immediately while release keeps animated settling`() {
+    fun `drag position snaps immediately while glass offset uses damped spring`() {
         val source = listOf(
             File("app/src/main/java/com/android/purebilibili/core/ui/animation/DampedDragAnimation.kt"),
             File("src/main/java/com/android/purebilibili/core/ui/animation/DampedDragAnimation.kt")
@@ -71,12 +71,13 @@ class DampedDragAnimationPolicyTest {
             .substringAfter("fun onDragEnd(")
             .substringBefore("fun updateIndex(index: Int)")
 
-        assertTrue(dragSource.contains("animatable.stop()"))
+        // 指示器位置必须即时更新,否则底栏/首页指示器会像失去滑动能力。
+        // 玻璃偏移单独走阻尼弹簧,只过滤折射采样抖动。
+        assertTrue(source.contains("private val dragFollowSpring = spring<Float>("))
         assertTrue(dragSource.contains("animatable.snapTo(newValue)"))
-        assertTrue(dragSource.contains("offsetAnimation.stop()"))
-        assertTrue(dragSource.contains("offsetAnimation.snapTo(desiredDragOffsetPx)"))
+        assertTrue(dragSource.contains("offsetAnimation.animateTo(desiredDragOffsetPx, dragFollowSpring)"))
+        assertFalse(dragSource.contains("animatable.animateTo(newValue, dragFollowSpring)"))
         assertTrue(dragSource.contains("dragVelocityItemsPerSecond = resolveDampedDragVelocityItemsPerSecond("))
-        assertFalse(dragSource.contains("animatable.animateTo(\n                targetValue = newValue"))
         assertTrue(releaseSource.contains("animatable.animateTo("))
         assertTrue(releaseSource.contains("offsetAnimation.animateTo(0f"))
     }

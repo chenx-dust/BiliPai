@@ -115,6 +115,7 @@ import com.android.purebilibili.core.util.responsiveContentWidth
 import com.android.purebilibili.core.util.CardPositionManager
 import com.android.purebilibili.core.ui.adaptive.resolveDeviceUiProfile
 import com.android.purebilibili.core.ui.adaptive.resolveEffectiveMotionTier
+import com.android.purebilibili.core.ui.motion.pullRefreshReleaseSpring
 import com.android.purebilibili.core.ui.performance.TrackJankStateFlag
 import com.android.purebilibili.core.ui.performance.TrackJankStateValue
 import com.android.purebilibili.core.util.resolveScrollToTopPlan
@@ -172,8 +173,11 @@ fun HomeScreen(
     onDownloadClick: () -> Unit = {},  // 离线缓存页面
     onInboxClick: () -> Unit = {},  // 私信页面
     onStoryClick: () -> Unit = {},  //  [新增] 竖屏短视频
+    onSpaceClick: (Long) -> Unit = {},
     globalHazeState: dev.chrisbanes.haze.HazeState? = null,  //  [新增] 全局底栏模糊状态
-    predictiveStableBackRouteMotionEnabled: Boolean = false
+    isReturningFromVideoDetail: Boolean = false,
+    isQuickReturningFromVideoDetail: Boolean = false,
+    onVideoDetailReturnAnimationConsumed: () -> Unit = {}
 ) {
     val state by viewModel.uiState.collectAsState(context = kotlin.coroutines.EmptyCoroutineContext)
     val isRefreshing by viewModel.isRefreshing.collectAsState(context = kotlin.coroutines.EmptyCoroutineContext)
@@ -587,8 +591,7 @@ fun HomeScreen(
     val baseIsBottomBarBlurEnabled = homeSettings.isBottomBarBlurEnabled
     val crashTrackingConsentShown = homeSettings.crashTrackingConsentShown
     val baseCardAnimationEnabled = homeSettings.cardAnimationEnabled      //  卡片进场动画开关
-    val baseCardTransitionEnabled = homeSettings.cardTransitionEnabled &&
-        !predictiveStableBackRouteMotionEnabled // 预测返回稳定路由模式下禁用首页共享元素，避免叠层滞留
+    val baseCardTransitionEnabled = homeSettings.cardTransitionEnabled
     val baseBottomBarLiquidGlassEnabled = remember(
         homeSettings.isBottomBarLiquidGlassEnabled,
         homeSettings.androidNativeLiquidGlassEnabled,
@@ -677,11 +680,11 @@ fun HomeScreen(
         isTabletLayout = windowSizeClass.isTablet,
         cardAnimationEnabled = cardAnimationEnabled,
         cardTransitionEnabled = cardTransitionEnabled,
-        isQuickReturnFromDetail = CardPositionManager.isQuickReturnFromDetail
+        isQuickReturnFromDetail = isQuickReturningFromVideoDetail
     )
     // 从详情页返回时延后清理“返回中”状态，避免卡片进场动画在共享转场期间抢跑造成闪屏。
-    LaunchedEffect(returnAnimationSuppressionDurationMs, CardPositionManager.isReturningFromDetail) {
-        if (CardPositionManager.isReturningFromDetail) {
+    LaunchedEffect(returnAnimationSuppressionDurationMs, isReturningFromVideoDetail) {
+        if (isReturningFromVideoDetail) {
             val startElapsedMs = if (returnAnimationStartElapsedMs > 0L) {
                 returnAnimationStartElapsedMs
             } else {
@@ -689,14 +692,14 @@ fun HomeScreen(
             }
             delay(returnAnimationSuppressionDurationMs)
             val actualDurationMs = (SystemClock.elapsedRealtime() - startElapsedMs).coerceAtLeast(0L)
-            val isQuickReturn = CardPositionManager.isQuickReturnFromDetail
+            val isQuickReturn = isQuickReturningFromVideoDetail
             val sharedTransitionReady = cardTransitionEnabled &&
                 CardPositionManager.lastClickedCardBounds != null &&
                 CardPositionManager.isCardFullyVisible
 
             // 先解除“返回中”状态，避免后续埋点统计导致首页手势恢复滞后。
             returnAnimationStartElapsedMs = 0L
-            CardPositionManager.clearReturning()
+            onVideoDetailReturnAnimationConsumed()
 
             val builtinPluginEnabledCount = com.android.purebilibili.core.plugin.PluginManager.getEnabledCount()
             val playerPluginEnabledCount = com.android.purebilibili.core.plugin.PluginManager.getEnabledPlayerPlugins().size
@@ -888,6 +891,19 @@ fun HomeScreen(
     
     //  [修复] 跟踪是否正在导航到/从视频页 - 必须在 LaunchedEffect 之前声明
     var isVideoNavigating by remember { mutableStateOf(false) }
+    var isHomeContentInteractionRestored by remember { mutableStateOf(true) }
+
+    LaunchedEffect(isReturningFromVideoDetail, cardTransitionEnabled, isQuickReturningFromVideoDetail) {
+        if (!isReturningFromVideoDetail) return@LaunchedEffect
+        val restoreDelayMs = resolveHomeContentInteractionRestoreDelayMs(
+            cardTransitionEnabled = cardTransitionEnabled,
+            isQuickReturnFromDetail = isQuickReturningFromVideoDetail
+        )
+        if (restoreDelayMs > 0L) {
+            delay(restoreDelayMs)
+        }
+        isHomeContentInteractionRestored = true
+    }
     
     //  [新增] 滚动方向检测状态（用于上滑隐藏模式）
     var bottomBarScrollState by remember(state.currentCategory) {
@@ -920,7 +936,8 @@ fun HomeScreen(
                 previousState = bottomBarScrollState,
                 firstVisibleItem = firstVisibleItem,
                 scrollOffset = scrollOffset,
-                isVideoNavigating = isVideoNavigating
+                isVideoNavigating = isVideoNavigating,
+                contentInteractionRestored = isHomeContentInteractionRestored
             )
 
             bottomBarScrollState = scrollUpdate.state
@@ -984,21 +1001,27 @@ fun HomeScreen(
             isLiquidGlassEnabled = false
         )
     }
-    val searchBarHeightDp = resolveHomeTopSearchBarHeight(uiPreset)
+    val searchBarHeightDp = resolveHomeTopSearchBarHeight(
+        uiPreset = uiPreset,
+        androidNativeVariant = androidNativeVariant
+    )
     val tabRowHeightDp = resolveHomeTopTabRowHeight(
         isTabFloating = topTabStyle.floating,
         uiPreset = uiPreset,
+        androidNativeVariant = androidNativeVariant,
         labelMode = homeSettings.topTabLabelMode
     )
     val searchCollapseDistanceDp = resolveHomeTopSearchCollapseDistance(
         searchBarHeight = searchBarHeightDp,
-        uiPreset = uiPreset
+        uiPreset = uiPreset,
+        androidNativeVariant = androidNativeVariant
     )
     val listTopPadding = resolveHomeTopReservedListPadding(
         statusBarHeight = statusBarHeight,
         searchBarHeight = searchBarHeightDp,
         tabRowHeight = tabRowHeightDp,
-        uiPreset = uiPreset
+        uiPreset = uiPreset,
+        androidNativeVariant = androidNativeVariant
     )
     
     // Pixels
@@ -1090,16 +1113,19 @@ fun HomeScreen(
     }
     var bottomBarRestoreJob by remember { mutableStateOf<kotlinx.coroutines.Job?>(null) }
     var topTabsRevealJob by remember { mutableStateOf<kotlinx.coroutines.Job?>(null) }
-    
 
     //  包装 onVideoClick：点击视频时先隐藏底栏再导航
-    val wrappedOnVideoClick: (HomeVideoClickRequest) -> Unit = remember(onVideoClick, setBottomBarVisible) {
+    val wrappedOnVideoClick: (HomeVideoClickRequest) -> Unit = remember(
+        onVideoClick,
+        setBottomBarVisible
+    ) {
         { request ->
-             hideTopTabsForForwardDetailNav = true
-             delayTopTabsUntilCardSettled = false
-             setBottomBarVisible(false)
-             isVideoNavigating = true
-             onVideoClick(request)
+            hideTopTabsForForwardDetailNav = true
+            delayTopTabsUntilCardSettled = false
+            setBottomBarVisible(false)
+            isVideoNavigating = true
+            isHomeContentInteractionRestored = false
+            onVideoClick(request)
         }
     }
     val onTodayWatchVideoClick: (VideoItem) -> Unit = remember(viewModel, wrappedOnVideoClick) {
@@ -1110,6 +1136,7 @@ fun HomeScreen(
                     bvid = video.bvid,
                     cid = video.cid,
                     coverUrl = video.pic,
+                    isVerticalVideo = video.isVertical,
                     source = HomeVideoClickSource.TODAY_WATCH
                 )
             )
@@ -1211,10 +1238,17 @@ fun HomeScreen(
                         //  使用 animateFloatAsState 包装偏移量
                         val animatedDragOffsetFraction by androidx.compose.animation.core.animateFloatAsState(
                             targetValue = resolvedStablePullOffsetFraction,
-                            animationSpec = androidx.compose.animation.core.spring(
-                                dampingRatio = 0.5f,  // 0.5 = 明显的弹性 (Bouncy)
-                                stiffness = 350f      // 350 = 中等刚度
-                            ),
+                            animationSpec = if (
+                                shouldSnapPullOffsetToFinger(
+                                    distanceFraction = pullDistanceFraction,
+                                    isRefreshing = isPageRefreshing,
+                                    isStateAnimating = pullRefreshState.isAnimating
+                                )
+                            ) {
+                                androidx.compose.animation.core.snap()
+                            } else {
+                                pullRefreshReleaseSpring()
+                            },
                             label = "pull_bounce"
                         )
 
@@ -1237,7 +1271,13 @@ fun HomeScreen(
                         
                         ComfortablePullToRefreshBox(
                             isRefreshing = isRefreshing && state.currentCategory == category,
-                            onRefresh = { viewModel.refresh() },
+                            onRefresh = {
+                                if (category == HomeCategory.FOLLOW) {
+                                    viewModel.refresh(category)
+                                } else {
+                                    viewModel.refresh()
+                                }
+                            },
                             state = pullRefreshState,
                             modifier = Modifier.fillMaxSize(),
                              //  不同原生外观使用不同下拉刷新指示器，位移策略仍由 policy 统一控制。
@@ -1338,7 +1378,19 @@ fun HomeScreen(
                                  // Data Content
                                  // [性能优化] Stabilize event callbacks to prevent recomposition on scroll
                                  val onLoadMoreCallback = remember(viewModel) { { viewModel.loadMore() } }
-                                 val onDismissVideoCallback = remember(viewModel) { { bvid: String -> viewModel.startVideoDissolve(bvid) } }
+                                 val onDismissVideoCallback = remember(viewModel, cardAnimationEnabled) {
+                                     { bvid: String ->
+                                         val transition = resolveHomeDismissVisualTransition(
+                                             isFeedbackRecorded = true,
+                                             cardAnimationEnabled = cardAnimationEnabled
+                                         )
+                                         if (transition.shouldStartDissolve) {
+                                             viewModel.startVideoDissolve(bvid)
+                                         } else if (transition.shouldRemoveImmediately) {
+                                             viewModel.completeVideoDissolve(bvid)
+                                         }
+                                     }
+                                 }
                                  val onWatchLaterCallback = remember(viewModel) { { bvid: String, aid: Long -> viewModel.addToWatchLater(bvid, aid) } }
                                  val onDissolveCompleteCallback = remember(viewModel) { { bvid: String -> viewModel.completeVideoDissolve(bvid) } }
                                  val onLongPressCallback = remember(targetVideoItemState) { { item: VideoItem -> targetVideoItemState.value = item } }
@@ -1346,6 +1398,8 @@ fun HomeScreen(
                                  val onTodayWatchModeChange = remember(viewModel) { { mode: TodayWatchMode -> viewModel.switchTodayWatchMode(mode) } }
                                  val onTodayWatchCollapsedChange = remember(viewModel) { { collapsed: Boolean -> viewModel.setTodayWatchCollapsed(collapsed) } }
                                  val onTodayWatchRefresh = remember(viewModel) { { viewModel.refreshTodayWatchOnly() } }
+                                 val onTodayWatchUpClick = remember(onSpaceClick) { { mid: Long -> onSpaceClick(mid) } }
+                                 val onHomeFeedUpClick = remember(onSpaceClick) { { mid: Long -> onSpaceClick(mid) } }
                                  val onPopularSubCategoryChange = remember(viewModel) {
                                      { subCategory: PopularSubCategory -> viewModel.switchPopularSubCategory(subCategory) }
                                  }
@@ -1362,6 +1416,7 @@ fun HomeScreen(
                                      dissolvingVideos = state.dissolvingVideos,
                                      followingMids = state.followingMids,
                                      onVideoClick = wrappedOnVideoClick,
+                                     onUpClick = onHomeFeedUpClick,
                                      onLiveClick = onLiveClickCallback,
                                      onLoadMore = onLoadMoreCallback,
                                      onDismissVideo = onDismissVideoCallback,
@@ -1372,6 +1427,8 @@ fun HomeScreen(
                                      cardAnimationEnabled = cardAnimationEnabled,
                                      cardMotionTier = cardMotionTier,
                                      cardTransitionEnabled = cardTransitionEnabled,
+                                     isReturningFromVideoDetail = isReturningFromVideoDetail,
+                                     isQuickReturningFromVideoDetail = isQuickReturningFromVideoDetail,
                                      smartVisualGuardEnabled = false,
                                      isDataSaverActive = isDataSaverActive,
                                      preferLowQualityCover = homeSettings.lowQualityHomeCoverInDataSaver,
@@ -1416,9 +1473,11 @@ fun HomeScreen(
                                      onTodayWatchModeChange = onTodayWatchModeChange,
                                      onTodayWatchCollapsedChange = onTodayWatchCollapsedChange,
                                      onTodayWatchRefresh = onTodayWatchRefresh,
+                                     onTodayWatchUpClick = onTodayWatchUpClick,
                                      popularSubCategory = state.popularSubCategory,
                                      onPopularSubCategoryChange = onPopularSubCategoryChange,
                                      onTodayWatchVideoClick = onTodayWatchVideoClick,
+                                     uiSkinDecoration = homeUiSkinDecoration,
                                      firstGridItemModifier = Modifier
                                  )
                              }
@@ -1486,6 +1545,11 @@ fun HomeScreen(
         
         // Calculate parameters based on scroll
         // 1. Search Bar Collapse (First phase)
+        val topTabsCollapsedForHeader = if (isHeaderCollapseEnabled) {
+            areTopTabsAutoCollapsed
+        } else {
+            areTopTabsManuallyCollapsed
+        }
         iOSHomeHeader(
             headerOffsetProvider = { headerOffsetHeightPx }, // [Optimization] Pass lambda to defer state read
             isHeaderCollapseEnabled = isHeaderCollapseEnabled,
@@ -1503,6 +1567,8 @@ fun HomeScreen(
                 }
             },
             onSettingsClick = onSettingsClick,
+            onInboxClick = onInboxClick,
+            topRightUnreadCount = state.messageUnreadCount,
             onSearchClick = onSearchClick,
             topCategories = localizedTopCategoryLabels,
             topCategoryKeys = topCategories.map { it.name },
@@ -1551,13 +1617,10 @@ fun HomeScreen(
             topTabsVisible = resolveHomeTopTabsVisible(
                 isDelayedForCardSettle = delayTopTabsUntilCardSettled,
                 isForwardNavigatingToDetail = hideTopTabsForForwardDetailNav,
-                isReturningFromDetail = CardPositionManager.isReturningFromDetail
+                isReturningFromDetail = isReturningFromVideoDetail,
+                topTabsCollapsed = topTabsCollapsedForHeader
             ),
-            topTabsCollapsed = if (isHeaderCollapseEnabled) {
-                areTopTabsAutoCollapsed
-            } else {
-                areTopTabsManuallyCollapsed
-            },
+            topTabsCollapsed = topTabsCollapsedForHeader,
             onTopTabsCollapsedChange = { collapsed ->
                 if (!isHeaderCollapseEnabled) {
                     areTopTabsManuallyCollapsed = collapsed
@@ -1698,6 +1761,7 @@ fun HomeScreen(
                              bvid = item.bvid,
                              cid = item.cid,
                              coverUrl = item.pic,
+                             isVerticalVideo = item.isVertical,
                              source = HomeVideoClickSource.PREVIEW
                          )
                      )
@@ -1736,7 +1800,7 @@ fun HomeScreen(
                     targetVideoItemState.value = null
                 },
                 onNotInterested = {
-                    viewModel.markNotInterested(item.bvid)
+                    viewModel.markNotInterested(item.bvid, cardAnimationEnabled = cardAnimationEnabled)
                     targetVideoItemState.value = null
                 },
                 onBlockCreator = {
@@ -1799,7 +1863,7 @@ fun HomeScreen(
             when (event) {
                 androidx.lifecycle.Lifecycle.Event.ON_START -> {
                     topTabsRevealJob?.cancel()
-                    val returningFromDetail = CardPositionManager.isReturningFromDetail
+                    val returningFromDetail = isReturningFromVideoDetail
                     if (hideTopTabsForForwardDetailNav || returningFromDetail) {
                         if (returningFromDetail) {
                             returnAnimationStartElapsedMs = SystemClock.elapsedRealtime()
@@ -1808,7 +1872,7 @@ fun HomeScreen(
                         val revealDelayMs = resolveHomeTopTabsRevealDelayMs(
                             isReturningFromDetail = returningFromDetail,
                             cardTransitionEnabled = cardTransitionEnabled,
-                            isQuickReturnFromDetail = CardPositionManager.isQuickReturnFromDetail
+                            isQuickReturnFromDetail = isQuickReturningFromVideoDetail
                         )
                         if (revealDelayMs > 0L) {
                             delayTopTabsUntilCardSettled = true
@@ -1824,7 +1888,7 @@ fun HomeScreen(
                     if (!bottomBarVisible && isVideoNavigating) {
                         val bottomBarRestoreDelayMs = resolveBottomBarRestoreDelayMs(
                             cardTransitionEnabled = cardTransitionEnabled,
-                            isQuickReturnFromDetail = CardPositionManager.isQuickReturnFromDetail
+                            isQuickReturnFromDetail = isQuickReturningFromVideoDetail
                         )
                         val resetNavigationDelayMs = if (cardTransitionEnabled) 200L else 80L
                         bottomBarRestoreJob = kotlinx.coroutines.MainScope().launch {
@@ -2022,4 +2086,13 @@ internal fun resolveBottomBarRestoreDelayMs(
     if (!cardTransitionEnabled) return 150L
     if (isQuickReturnFromDetail) return 340L
     return 380L
+}
+
+internal fun resolveHomeContentInteractionRestoreDelayMs(
+    cardTransitionEnabled: Boolean,
+    isQuickReturnFromDetail: Boolean
+): Long {
+    // 视觉返场保护仍由 suppression / 底栏恢复窗口负责；
+    // 首页列表手势应在页面重新可见时立即恢复，避免第一下滑动被导航态吞掉。
+    return 0L
 }

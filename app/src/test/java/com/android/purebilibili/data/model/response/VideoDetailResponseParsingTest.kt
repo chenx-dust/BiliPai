@@ -75,4 +75,54 @@ class VideoDetailResponseParsingTest {
         assertEquals(2, info.staff.first().vip.type)
         assertEquals("认证", info.staff.first().official.title)
     }
+
+    @Test
+    fun `decode ugc season episode arc keeps publish timestamps`() {
+        val payload = """
+            {
+              "code": 0,
+              "message": "0",
+              "data": {
+                "bvid": "BV1collection",
+                "ugc_season": {
+                  "id": 725909,
+                  "title": "洞穴探险",
+                  "sections": [
+                    {
+                      "season_id": 725909,
+                      "episodes": [
+                        {
+                          "id": 1,
+                          "aid": 1001,
+                          "bvid": "BV1ep",
+                          "cid": 2001,
+                          "title": "潜水抓鱼",
+                          "arc": {
+                            "aid": 1001,
+                            "pic": "https://example.com/cover.jpg",
+                            "title": "潜水抓鱼",
+                            "duration": 755,
+                            "pubdate": 1715427472,
+                            "ctime": 1715427000
+                          }
+                        }
+                      ]
+                    }
+                  ]
+                }
+              }
+            }
+        """.trimIndent()
+
+        val response = json.decodeFromString<VideoDetailResponse>(payload)
+        val arc = response.data?.ugc_season?.sections
+            ?.firstOrNull()
+            ?.episodes
+            ?.firstOrNull()
+            ?.arc
+
+        assertNotNull(arc)
+        assertEquals(1715427472L, arc.pubdate)
+        assertEquals(1715427000L, arc.ctime)
+    }
 }

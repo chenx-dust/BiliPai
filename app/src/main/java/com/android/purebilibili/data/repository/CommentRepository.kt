@@ -393,13 +393,14 @@ object CommentRepository {
         rootId: Long,
         page: Int,
         ps: Int = 20,
-        paginationOffset: String? = null
+        paginationOffset: String? = null,
+        preferRestPaging: Boolean = false
     ): Result<ReplyData> = withContext(Dispatchers.IO) {
         try {
             // 确保 buvid3 已初始化
             VideoRepository.ensureBuvid3()
 
-            if (shouldTryGrpcPagedRequest(page = page, paginationOffset = paginationOffset)) {
+            if (!preferRestPaging && shouldTryGrpcPagedRequest(page = page, paginationOffset = paginationOffset)) {
                 val grpcResult = CommentGrpcRepository.getDetailList(
                     oid = oid,
                     type = type,

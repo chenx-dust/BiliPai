@@ -26,6 +26,12 @@ ICON_MAPPING = {
     "tail_icon_shop": "member",
     "tail_icon_myself": "profile",
 }
+SELECTED_ICON_MAPPING = {
+    "tail_icon_selected_main": "home_selected",
+    "tail_icon_selected_dynamic": "following_selected",
+    "tail_icon_selected_shop": "member_selected",
+    "tail_icon_selected_myself": "profile_selected",
+}
 
 
 def main() -> None:
@@ -118,8 +124,19 @@ def build_manifest_and_asset_sources(
     manifest_assets: dict[str, object] = {"bottomBarIcons": {}}
     with zipfile.ZipFile(package_zip) as archive:
         package_names = set(archive.namelist())
-        bottom = first_existing_package_asset(package_names, ["tail_bg.png", "side_bg_bottom.png"])
-        top = first_existing_package_asset(package_names, ["head_bg.jpg", "head_tab_bg.jpg", "side_bg.jpg"])
+        bottom = first_existing_package_asset(package_names, ["tail_bg.png", "tail_bg.jpg", "side_bg_bottom.png", "side_bg_bottom.jpg"])
+        top = first_existing_package_asset(package_names, ["head_bg.jpg", "head_tab_bg.jpg"])
+        side = first_existing_package_asset(package_names, ["side_bg.jpg", "side_bg.png"])
+        profile = first_existing_package_asset(package_names, ["head_myself_bg.jpg", "head_myself_bg.png"])
+        profile_squared = first_existing_package_asset(
+            package_names,
+            ["head_myself_squared_bg.jpg", "head_myself_squared_bg.png"],
+        )
+        channel = first_existing_package_asset(package_names, ["tail_icon_channel.png", "tail_icon_channel.jpg"])
+        channel_selected = first_existing_package_asset(
+            package_names,
+            ["tail_icon_selected_channel.png", "tail_icon_selected_channel.jpg"],
+        )
         if bottom:
             target = f"assets/{Path(bottom).name}"
             assets[target] = ZipAsset(package_zip, bottom)
@@ -128,7 +145,41 @@ def build_manifest_and_asset_sources(
             target = f"assets/{Path(top).name}"
             assets[target] = ZipAsset(package_zip, top)
             manifest_assets["topAtmosphere"] = target
+        top_tab = first_existing_package_asset(package_names, ["head_tab_bg.jpg", "head_tab_bg.png"])
+        if top_tab and top_tab != top:
+            target = f"assets/{Path(top_tab).name}"
+            assets[target] = ZipAsset(package_zip, top_tab)
+            manifest_assets["homeTopTabBackground"] = target
+        if side:
+            target = f"assets/{Path(side).name}"
+            assets[target] = ZipAsset(package_zip, side)
+            manifest_assets["homeSideBackground"] = target
+        if profile:
+            target = f"assets/{Path(profile).name}"
+            assets[target] = ZipAsset(package_zip, profile)
+            manifest_assets["homeProfileBackground"] = target
+        if profile_squared:
+            target = f"assets/{Path(profile_squared).name}"
+            assets[target] = ZipAsset(package_zip, profile_squared)
+            manifest_assets["homeProfileSquaredBackground"] = target
+        if channel:
+            target = f"assets/{Path(channel).name}"
+            assets[target] = ZipAsset(package_zip, channel)
+            manifest_assets["homeChannelIcon"] = target
+        if channel_selected:
+            target = f"assets/{Path(channel_selected).name}"
+            assets[target] = ZipAsset(package_zip, channel_selected)
+            manifest_assets["homeChannelSelectedIcon"] = target
         for package_stem, host_key in ICON_MAPPING.items():
+            source = first_existing_package_asset(
+                package_names,
+                [f"{package_stem}.png", f"{package_stem}.jpg"],
+            )
+            if source:
+                target = f"assets/{Path(source).name}"
+                assets[target] = ZipAsset(package_zip, source)
+                manifest_assets["bottomBarIcons"][host_key] = target
+        for package_stem, host_key in SELECTED_ICON_MAPPING.items():
             source = first_existing_package_asset(
                 package_names,
                 [f"{package_stem}.png", f"{package_stem}.jpg"],

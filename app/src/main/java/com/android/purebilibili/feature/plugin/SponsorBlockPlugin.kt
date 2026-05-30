@@ -41,6 +41,7 @@ import com.android.purebilibili.core.plugin.SkipAction
 import com.android.purebilibili.core.ui.components.*
 import com.android.purebilibili.core.util.Logger
 import com.android.purebilibili.core.util.FormatUtils
+import com.android.purebilibili.core.util.rememberNotificationPermissionState
 import com.android.purebilibili.data.model.response.SponsorBlockMarkerMode
 import com.android.purebilibili.data.model.response.SponsorSegment
 import com.android.purebilibili.data.model.response.SponsorProgressMarker
@@ -386,6 +387,20 @@ class SponsorBlockPlugin : PlayerPluginApi {
                 scheduleSponsorBlockDailySummary(context, config.dailySummaryNotificationEnabled)
             }
         }
+        fun showNotificationToast(message: String) {
+            android.widget.Toast.makeText(context, message, android.widget.Toast.LENGTH_SHORT).show()
+        }
+        fun sendTestNotification() {
+            val posted = postSponsorBlockTestNotification(context, config)
+            showNotificationToast(if (posted) "测试通知已发送" else "系统通知未开启")
+        }
+        val notificationPermission = rememberNotificationPermissionState { granted ->
+            if (granted) {
+                sendTestNotification()
+            } else {
+                showNotificationToast("通知权限未开启")
+            }
+        }
         
         // 加载配置
         LaunchedEffect(Unit) {
@@ -473,6 +488,18 @@ class SponsorBlockPlugin : PlayerPluginApi {
                     textStyle = MaterialTheme.typography.bodyMedium
                 )
             }
+
+            IOSClickableItem(
+                icon = CupertinoIcons.Default.Bell,
+                title = "发送测试通知",
+                subtitle = "确认空降助手通知权限和展示效果，不写入跳过记录",
+                onClick = {
+                    notificationPermission.launchWithPermission {
+                        sendTestNotification()
+                    }
+                },
+                iconTint = Color(0xFF34C759)
+            )
             
             androidx.compose.material3.HorizontalDivider(
                 modifier = Modifier.padding(start = 56.dp),

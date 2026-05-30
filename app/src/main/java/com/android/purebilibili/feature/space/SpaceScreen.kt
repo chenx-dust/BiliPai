@@ -1,17 +1,13 @@
 package com.android.purebilibili.feature.space
 
 import androidx.compose.animation.AnimatedVisibilityScope
-import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.ExperimentalSharedTransitionApi
 import androidx.compose.animation.SharedTransitionScope
-import androidx.compose.animation.SizeTransform
-import androidx.compose.animation.fadeIn
-import androidx.compose.animation.fadeOut
-import androidx.compose.animation.togetherWith
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyRow
@@ -51,9 +47,9 @@ import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MenuDefaults
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -71,6 +67,8 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
@@ -79,8 +77,11 @@ import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalViewConfiguration
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.rememberTextMeasurer
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -93,11 +94,19 @@ import coil.request.ImageRequest
 import com.android.purebilibili.R
 import com.android.purebilibili.core.ui.AdaptiveScaffold
 import com.android.purebilibili.core.ui.AdaptiveTopAppBar
+import com.android.purebilibili.core.ui.AppShapes
+import com.android.purebilibili.core.ui.ContainerLevel
+import com.android.purebilibili.core.ui.OfficialVerifyBadge
+import com.android.purebilibili.core.ui.OfficialVerifyBadgeSpec
 import com.android.purebilibili.core.ui.blur.BlurSurfaceType
 import com.android.purebilibili.core.ui.blur.rememberRecoverableHazeState
 import com.android.purebilibili.core.ui.blur.unifiedBlur
+import com.android.purebilibili.core.ui.resolveOfficialVerifyBadge
 import com.android.purebilibili.core.ui.components.IOSSearchBar
+import com.android.purebilibili.core.ui.transition.LocalVideoCardSharedElementSourceRoute
 import com.android.purebilibili.core.ui.transition.VIDEO_SHARED_COVER_ASPECT_RATIO
+import com.android.purebilibili.core.ui.transition.resolveVideoCardSharedTransitionMotionSpec
+import com.android.purebilibili.core.ui.transition.videoCardShellSharedElementKey
 import com.android.purebilibili.core.ui.components.UserLevelBadge
 import com.android.purebilibili.core.util.FormatUtils
 import com.android.purebilibili.core.util.CardPositionManager
@@ -122,6 +131,8 @@ import com.android.purebilibili.feature.dynamic.components.DynamicCommentOverlay
 import com.android.purebilibili.feature.dynamic.components.ImagePreviewDialog
 import com.android.purebilibili.feature.dynamic.components.RepostDialog
 import com.android.purebilibili.feature.home.components.BottomBarLiquidSegmentedControl
+import com.android.purebilibili.feature.list.VideoProgressDisplayState
+import com.android.purebilibili.feature.video.controller.PlaybackProgressManager
 import dev.chrisbanes.haze.hazeSource
 import kotlinx.coroutines.launch
 
@@ -130,12 +141,12 @@ import kotlinx.coroutines.launch
 fun SpaceScreen(
     mid: Long,
     onBack: () -> Unit,
-    onVideoClick: (String) -> Unit,
+    onVideoClick: (String, Long) -> Unit,
     onAudioClick: (Long) -> Unit = {},
     onBangumiClick: (Long) -> Unit = {},
     onWebClick: (String, String) -> Unit = { _, _ -> },
     onUserClick: (Long) -> Unit = {},
-    onPlayAllAudioClick: ((String) -> Unit)? = null,
+    onPlayAllAudioClick: ((String, Long) -> Unit)? = null,
     onDynamicDetailClick: (String) -> Unit = {},
     onArticleClick: (Long, String) -> Unit = { _, _ -> },
     onViewAllClick: (String, Long, Long, String, String) -> Unit = { _, _, _, _, _ -> },
@@ -144,6 +155,12 @@ fun SpaceScreen(
     animatedVisibilityScope: AnimatedVisibilityScope? = null
 ) {
     val context = LocalContext.current
+    val playbackProgressManager = remember(context) {
+        PlaybackProgressManager.getInstance(context)
+    }
+    val videoProgressLookup: (String) -> Long = remember(playbackProgressManager) {
+        { bvid -> playbackProgressManager.getCachedPosition(bvid) }
+    }
     val dynamicInteractionViewModel: DynamicViewModel = viewModel()
     val uiState by viewModel.uiState.collectAsState()
     val likedDynamics by dynamicInteractionViewModel.likedDynamics.collectAsState()
@@ -181,11 +198,28 @@ fun SpaceScreen(
     } ?: SpaceSearchScope.NONE
     val canSearch = currentSearchScope != SpaceSearchScope.NONE
     val isSearchMode = currentSuccessState?.isSearchMode == true
+    val hasContributionToolbarForSearch = currentSuccessState?.let { success ->
+        currentSearchScope == SpaceSearchScope.VIDEO &&
+            resolveDisplayedSpaceContributionTabs(
+                tabs = success.contributionTabs,
+                totalAudios = success.totalAudios
+            ).isNotEmpty()
+    } == true
     val screenTitle = stringResource(R.string.space_title)
     val backLabel = stringResource(R.string.common_back)
     val moreLabel = stringResource(R.string.common_more)
     val blockUserLabel = stringResource(R.string.space_block_user)
     val unblockUserLabel = stringResource(R.string.space_unblock_user)
+
+    LaunchedEffect(isSearchMode, currentSearchScope, hasContributionToolbarForSearch) {
+        if (!isSearchMode) return@LaunchedEffect
+        resolveSpaceSearchBarGridItemIndex(
+            scope = currentSearchScope,
+            hasContributionToolbar = hasContributionToolbarForSearch
+        )?.let { searchBarIndex ->
+            gridState.animateScrollToItem(searchBarIndex)
+        }
+    }
 
     AdaptiveScaffold(
         modifier = Modifier.nestedScroll(scrollBehavior.nestedScrollConnection),
@@ -323,6 +357,7 @@ fun SpaceScreen(
                             state = state,
                             gridState = gridState,
                             onVideoClick = onVideoClick,
+                            videoProgressLookup = videoProgressLookup,
                             onAudioClick = onAudioClick,
                             onBangumiClick = onBangumiClick,
                             onWebClick = onWebClick,
@@ -555,12 +590,13 @@ fun SpaceScreen(
 private fun SpaceContent(
     state: SpaceUiState.Success,
     gridState: LazyGridState,
-    onVideoClick: (String) -> Unit,
+    onVideoClick: (String, Long) -> Unit,
+    videoProgressLookup: (String) -> Long,
     onAudioClick: (Long) -> Unit,
     onBangumiClick: (Long) -> Unit,
     onWebClick: (String, String) -> Unit,
     onUserClick: (Long) -> Unit,
-    onPlayAllAudioClick: ((String) -> Unit)?,
+    onPlayAllAudioClick: ((String, Long) -> Unit)?,
     onDynamicDetailClick: (String) -> Unit,
     onArticleClick: (Long, String) -> Unit,
     onViewAllClick: (String, Long, Long, String, String) -> Unit,
@@ -623,6 +659,15 @@ private fun SpaceContent(
             selectedSubTab = state.selectedSubTab
         )
     }
+    val searchFocusRequester = remember { FocusRequester() }
+    val lazyGridSharedTransitionEnabled = remember(sharedTransitionScope, animatedVisibilityScope) {
+        shouldEnableSpaceLazyGridSharedTransition(
+            hasSharedTransitionScope = sharedTransitionScope != null,
+            hasAnimatedVisibilityScope = animatedVisibilityScope != null
+        )
+    }
+    val lazyGridSharedTransitionScope = sharedTransitionScope.takeIf { lazyGridSharedTransitionEnabled }
+    val lazyGridAnimatedVisibilityScope = animatedVisibilityScope.takeIf { lazyGridSharedTransitionEnabled }
     var contributionVideoLayoutMode by rememberSaveable(state.userInfo.mid) {
         mutableStateOf(defaultSpaceContributionVideoLayoutMode())
     }
@@ -645,16 +690,17 @@ private fun SpaceContent(
         }
     }
     val playVideoFromSpace: (String) -> Unit = play@{ bvid ->
+        val resumePositionMs = resolveSpaceResumePositionMs(videoProgressLookup(bvid))
         val playlist = buildExternalPlaylistFromSpaceVideos(
             videos = state.videos,
             clickedBvid = bvid
-        ) ?: return@play onVideoClick(bvid)
+        ) ?: return@play onVideoClick(bvid, resumePositionMs)
         com.android.purebilibili.feature.video.player.PlaylistManager.setExternalPlaylist(
             playlist.playlistItems,
             playlist.startIndex,
             source = com.android.purebilibili.feature.video.player.ExternalPlaylistSource.SPACE
         )
-        onVideoClick(bvid)
+        onVideoClick(bvid, resumePositionMs)
     }
     val playAllSpaceVideos: () -> Unit = playAll@{
         val startBvid = resolveSpacePlayAllStartTarget(state.videos) ?: return@playAll
@@ -667,9 +713,10 @@ private fun SpaceContent(
             playlist.startIndex,
             source = com.android.purebilibili.feature.video.player.ExternalPlaylistSource.SPACE
         )
+        val resumePositionMs = resolveSpaceResumePositionMs(videoProgressLookup(startBvid))
         com.android.purebilibili.feature.video.player.PlaylistManager
             .setPlayMode(com.android.purebilibili.feature.video.player.PlayMode.SEQUENTIAL)
-        onPlayAllAudioClick?.invoke(startBvid) ?: onVideoClick(startBvid)
+        onPlayAllAudioClick?.invoke(startBvid, resumePositionMs) ?: onVideoClick(startBvid, resumePositionMs)
     }
 
     LaunchedEffect(state.userInfo.mid) {
@@ -726,8 +773,8 @@ private fun SpaceContent(
                     onTopPhotoClick = onTopPhotoClick,
                     onAvatarClick = onAvatarClick,
                     onLiveClick = { url, title -> onWebClick(url, title) },
-                    sharedTransitionScope = sharedTransitionScope,
-                    animatedVisibilityScope = animatedVisibilityScope
+                    sharedTransitionScope = lazyGridSharedTransitionScope,
+                    animatedVisibilityScope = lazyGridAnimatedVisibilityScope
                 )
             }
 
@@ -745,7 +792,10 @@ private fun SpaceContent(
                     item(span = { GridItemSpan(maxLineSpan) }) {
                         SpaceTopVideoCard(
                             video = topVideo,
-                            onClick = { playVideoFromSpace(topVideo.bvid) }
+                            onClick = { playVideoFromSpace(topVideo.bvid) },
+                            sharedTransitionKey = resolveSpaceArchiveSharedTransitionKey(topVideo.bvid),
+                            sharedTransitionScope = lazyGridSharedTransitionScope,
+                            animatedVisibilityScope = lazyGridAnimatedVisibilityScope
                         )
                     }
                 }
@@ -770,9 +820,14 @@ private fun SpaceContent(
                         )
                     }
                     items(state.videos.take(4), key = { "home_video_${it.bvid}" }) { video ->
+                        val localProgressMs = videoProgressLookup(video.bvid)
                         SpaceHomeVideoCard(
                             video = video,
-                            onClick = { playVideoFromSpace(video.bvid) }
+                            progressState = resolveSpaceVideoProgressState(video, localProgressMs),
+                            onClick = { playVideoFromSpace(video.bvid) },
+                            sharedTransitionKey = resolveSpaceArchiveSharedTransitionKey(video.bvid),
+                            sharedTransitionScope = lazyGridSharedTransitionScope,
+                            animatedVisibilityScope = lazyGridAnimatedVisibilityScope
                         )
                     }
                 }
@@ -825,7 +880,10 @@ private fun SpaceContent(
                                     onBangumiClick = onBangumiClick,
                                     onWebClick = onWebClick
                                 )
-                            }
+                            },
+                            sharedTransitionKey = resolveSpaceArchiveSharedTransitionKey(item.bvid),
+                            sharedTransitionScope = lazyGridSharedTransitionScope,
+                            animatedVisibilityScope = lazyGridAnimatedVisibilityScope
                         )
                     }
                 }
@@ -849,7 +907,10 @@ private fun SpaceContent(
                                     onBangumiClick = onBangumiClick,
                                     onWebClick = onWebClick
                                 )
-                            }
+                            },
+                            sharedTransitionKey = resolveSpaceArchiveSharedTransitionKey(item.bvid),
+                            sharedTransitionScope = lazyGridSharedTransitionScope,
+                            animatedVisibilityScope = lazyGridAnimatedVisibilityScope
                         )
                     }
                 }
@@ -874,7 +935,13 @@ private fun SpaceContent(
                     ) { article ->
                         SpaceArticleListItem(
                             article = article,
-                            onClick = { onArticleClick(article.id, article.title) }
+                            onClick = {
+                                dispatchSpaceArticleClick(
+                                    article = article,
+                                    onDynamicDetailClick = onDynamicDetailClick,
+                                    onArticleClick = onArticleClick
+                                )
+                            }
                         )
                     }
                 }
@@ -953,7 +1020,10 @@ private fun SpaceContent(
                                     onBangumiClick = onBangumiClick,
                                     onWebClick = onWebClick
                                 )
-                            }
+                            },
+                            sharedTransitionKey = resolveSpaceArchiveSharedTransitionKey(item.bvid),
+                            sharedTransitionScope = lazyGridSharedTransitionScope,
+                            animatedVisibilityScope = lazyGridAnimatedVisibilityScope
                         )
                     }
                 }
@@ -980,11 +1050,16 @@ private fun SpaceContent(
             SpaceMainTab.DYNAMIC -> {
                 if (state.isSearchMode && currentSearchScope == SpaceSearchScope.DYNAMIC) {
                     item(span = { GridItemSpan(maxLineSpan) }) {
+                        LaunchedEffect(state.isSearchMode, currentSearchScope) {
+                            searchFocusRequester.requestFocus()
+                        }
                         IOSSearchBar(
                             query = state.searchQuery,
                             onQueryChange = onSearchQueryChange,
                             placeholder = resolveSpaceSearchPlaceholder(currentSearchScope),
-                            modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp)
+                            modifier = Modifier
+                                .padding(horizontal = 16.dp, vertical = 8.dp)
+                                .focusRequester(searchFocusRequester)
                         )
                     }
                 }
@@ -1034,7 +1109,9 @@ private fun SpaceContent(
                                     title.ifBlank { uname }
                                 )
                             },
+                            onArticleClick = onArticleClick,
                             onDynamicDetailClick = onDynamicDetailClick,
+                            onPrimaryClickOverride = { onSpaceDynamicCommentClick(dynamic) },
                             gifImageLoader = context.imageLoader,
                             onCommentClick = { onSpaceDynamicCommentClick(dynamic) },
                             onRepostClick = onSpaceDynamicRepostClick,
@@ -1063,11 +1140,20 @@ private fun SpaceContent(
             SpaceMainTab.CONTRIBUTION -> {
                 if (displayedContributionTabs.isNotEmpty()) {
                     item(span = { GridItemSpan(maxLineSpan) }) {
-                        SpaceContributionTabRow(
+                        SpaceContributionToolbar(
                             tabs = displayedContributionTabs,
                             selectedTabId = state.selectedContributionTabId,
                             selectedSubTab = state.selectedSubTab,
-                            onSelect = onContributionTabSelected
+                            totalVideos = state.totalVideos,
+                            currentOrder = state.sortOrder,
+                            layoutMode = contributionVideoLayoutMode,
+                            onSelect = onContributionTabSelected,
+                            onPlayAllClick = playAllSpaceVideos,
+                            onOrderClick = onSortOrderSelected,
+                            onLayoutModeClick = {
+                                contributionVideoLayoutMode =
+                                    toggleSpaceContributionVideoLayoutMode(contributionVideoLayoutMode)
+                            }
                         )
                     }
                 }
@@ -1078,31 +1164,22 @@ private fun SpaceContent(
                     selectedContributionTab.subTab in setOf(SpaceSubTab.VIDEO, SpaceSubTab.CHARGING_VIDEO)
                 ) {
                     item(span = { GridItemSpan(maxLineSpan) }) {
+                        LaunchedEffect(state.isSearchMode, currentSearchScope) {
+                            searchFocusRequester.requestFocus()
+                        }
                         IOSSearchBar(
                             query = state.searchQuery,
                             onQueryChange = onSearchQueryChange,
                             placeholder = resolveSpaceSearchPlaceholder(currentSearchScope),
-                            modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp)
+                            modifier = Modifier
+                                .padding(horizontal = 16.dp, vertical = 4.dp)
+                                .focusRequester(searchFocusRequester)
                         )
                     }
                 }
 
                 when (selectedContributionTab.subTab) {
                     SpaceSubTab.VIDEO, SpaceSubTab.CHARGING_VIDEO -> {
-                        item(span = { GridItemSpan(maxLineSpan) }) {
-                            SpaceContributionVideoActions(
-                                totalVideos = state.totalVideos,
-                                currentOrder = state.sortOrder,
-                                layoutMode = contributionVideoLayoutMode,
-                                onPlayAllClick = playAllSpaceVideos,
-                                onOrderClick = onSortOrderSelected,
-                                onLayoutModeClick = {
-                                    contributionVideoLayoutMode =
-                                        toggleSpaceContributionVideoLayoutMode(contributionVideoLayoutMode)
-                                }
-                            )
-                        }
-
                         if (state.videos.isEmpty() && !state.isLoadingMore) {
                             item(span = { GridItemSpan(maxLineSpan) }) {
                                 SpaceSectionEmptyState(
@@ -1114,7 +1191,13 @@ private fun SpaceContent(
 
                         items(
                             items = state.videos,
-                            key = { "space_video_${it.bvid}_${it.aid}" },
+                            key = {
+                                resolveSpaceContributionVideoItemKey(
+                                    layoutMode = contributionVideoLayoutMode,
+                                    bvid = it.bvid,
+                                    aid = it.aid
+                                )
+                            },
                             span = {
                                 GridItemSpan(
                                     resolveSpaceContributionVideoGridSpan(
@@ -1124,36 +1207,34 @@ private fun SpaceContent(
                                 )
                             }
                         ) { video ->
-                            AnimatedContent(
-                                targetState = contributionVideoLayoutMode,
-                                transitionSpec = {
-                                    fadeIn(animationSpec = tween(180)) togetherWith
-                                        fadeOut(animationSpec = tween(120)) using
-                                        SizeTransform(clip = false)
-                                },
-                                label = "spaceContributionVideoLayout"
-                            ) { layoutMode ->
-                                when (layoutMode) {
-                                    SpaceContributionVideoLayoutMode.GRID -> {
-                                        SpaceHomeVideoCard(
-                                            video = video,
-                                            onClick = { playVideoFromSpace(video.bvid) }
-                                        )
-                                    }
-                                    SpaceContributionVideoLayoutMode.SINGLE_COLUMN -> {
-                                        SpaceArchiveListItemRow(
-                                            title = video.title,
-                                            cover = video.pic,
-                                            duration = video.length,
-                                            publishTime = FormatUtils.formatPublishTime(video.created),
-                                            play = video.play.toLong(),
-                                            secondaryCount = video.comment.toLong(),
-                                            onClick = { playVideoFromSpace(video.bvid) },
-                                            sharedTransitionKey = resolveSpaceArchiveSharedTransitionKey(video.bvid),
-                                            sharedTransitionScope = sharedTransitionScope,
-                                            animatedVisibilityScope = animatedVisibilityScope
-                                        )
-                                    }
+                            val localProgressMs = videoProgressLookup(video.bvid)
+                            when (contributionVideoLayoutMode) {
+                                SpaceContributionVideoLayoutMode.GRID -> {
+                                    SpaceHomeVideoCard(
+                                        video = video,
+                                        progressState = resolveSpaceVideoProgressState(video, localProgressMs),
+                                        badgeLabel = resolveSpaceVideoChargeBadgeLabel(video),
+                                        onClick = { playVideoFromSpace(video.bvid) },
+                                        sharedTransitionKey = resolveSpaceArchiveSharedTransitionKey(video.bvid),
+                                        sharedTransitionScope = lazyGridSharedTransitionScope,
+                                        animatedVisibilityScope = lazyGridAnimatedVisibilityScope
+                                    )
+                                }
+                                SpaceContributionVideoLayoutMode.SINGLE_COLUMN -> {
+                                    SpaceArchiveListItemRow(
+                                        title = video.title,
+                                        cover = video.pic,
+                                        duration = video.length,
+                                        publishTime = FormatUtils.formatPublishTime(video.created),
+                                        play = video.play.toLong(),
+                                        secondaryCount = video.comment.toLong(),
+                                        progressState = resolveSpaceVideoProgressState(video, localProgressMs),
+                                        badgeLabel = resolveSpaceVideoChargeBadgeLabel(video),
+                                        onClick = { playVideoFromSpace(video.bvid) },
+                                        sharedTransitionKey = resolveSpaceArchiveSharedTransitionKey(video.bvid),
+                                        sharedTransitionScope = lazyGridSharedTransitionScope,
+                                        animatedVisibilityScope = lazyGridAnimatedVisibilityScope
+                                    )
                                 }
                             }
                         }
@@ -1215,7 +1296,13 @@ private fun SpaceContent(
                         ) { article ->
                             SpaceArticleListItem(
                                 article = article,
-                                onClick = { onArticleClick(article.id, article.title) }
+                                onClick = {
+                                    dispatchSpaceArticleClick(
+                                        article = article,
+                                        onDynamicDetailClick = onDynamicDetailClick,
+                                        onArticleClick = onArticleClick
+                                    )
+                                }
                             )
                         }
 
@@ -1271,10 +1358,15 @@ private fun SpaceContent(
                                 publishTime = FormatUtils.formatPublishTime(archive.pubdate),
                                 play = archive.stat.view,
                                 secondaryCount = archive.stat.danmaku,
-                                onClick = { onVideoClick(archive.bvid) },
+                                onClick = {
+                                    onVideoClick(
+                                        archive.bvid,
+                                        resolveSpaceResumePositionMs(videoProgressLookup(archive.bvid))
+                                    )
+                                },
                                 sharedTransitionKey = resolveSpaceArchiveSharedTransitionKey(archive.bvid),
-                                sharedTransitionScope = sharedTransitionScope,
-                                animatedVisibilityScope = animatedVisibilityScope
+                                sharedTransitionScope = lazyGridSharedTransitionScope,
+                                animatedVisibilityScope = lazyGridAnimatedVisibilityScope
                             )
                         }
                     }
@@ -1319,10 +1411,15 @@ private fun SpaceContent(
                                 publishTime = FormatUtils.formatPublishTime(archive.pubdate),
                                 play = archive.stat.view,
                                 secondaryCount = archive.stat.danmaku,
-                                onClick = { onVideoClick(archive.bvid) },
+                                onClick = {
+                                    onVideoClick(
+                                        archive.bvid,
+                                        resolveSpaceResumePositionMs(videoProgressLookup(archive.bvid))
+                                    )
+                                },
                                 sharedTransitionKey = resolveSpaceArchiveSharedTransitionKey(archive.bvid),
-                                sharedTransitionScope = sharedTransitionScope,
-                                animatedVisibilityScope = animatedVisibilityScope
+                                sharedTransitionScope = lazyGridSharedTransitionScope,
+                                animatedVisibilityScope = lazyGridAnimatedVisibilityScope
                             )
                         }
                     }
@@ -1594,7 +1691,13 @@ private fun SpaceHeader(
     val topPhotoUrl = normalizeSpaceTopPhotoUrl(userInfo.topPhoto)
     val avatarPreviewEnabled = userInfo.face.isNotBlank()
     val followLabel = if (userInfo.isFollowed) "已关注" else "关注"
-    val officialText = userInfo.official.title.ifBlank { userInfo.official.desc }
+    val officialBadge = remember(userInfo.official) {
+        resolveOfficialVerifyBadge(
+            type = userInfo.official.type,
+            title = userInfo.official.title,
+            desc = userInfo.official.desc
+        )
+    }
     val metrics = remember(relationStat, upStat) {
         resolveSpaceHeaderMetricItems(
             relationStat = relationStat,
@@ -1672,7 +1775,7 @@ private fun SpaceHeader(
                     val avatarModifier = if (sharedTransitionScope != null && animatedVisibilityScope != null) {
                         with(sharedTransitionScope) {
                             Modifier.sharedBounds(
-                                rememberSharedContentState(key = "up_avatar_${userInfo.mid}"),
+                                rememberSharedContentState(key = com.android.purebilibili.core.ui.transition.avatarSharedElementKey(userInfo.mid)),
                                 animatedVisibilityScope = animatedVisibilityScope,
                                 clipInOverlayDuringTransition = OverlayClip(CircleShape)
                             )
@@ -1858,9 +1961,9 @@ private fun SpaceHeader(
                 }
             }
 
-            if (officialText.isNotBlank()) {
+            if (officialBadge != null) {
                 Spacer(modifier = Modifier.height(10.dp))
-                SpaceOfficialTag(text = officialText)
+                SpaceOfficialTag(badge = officialBadge)
             }
 
             if (userInfo.sign.isNotBlank()) {
@@ -1926,39 +2029,207 @@ private fun SpaceMainTabRow(
 }
 
 @Composable
-private fun SpaceContributionTabRow(
+private fun SpaceContributionToolbar(
     tabs: List<SpaceContributionTab>,
     selectedTabId: String,
     selectedSubTab: SpaceSubTab,
-    onSelect: (String) -> Unit
+    totalVideos: Int,
+    currentOrder: VideoSortOrder,
+    layoutMode: SpaceContributionVideoLayoutMode,
+    onSelect: (String) -> Unit,
+    onPlayAllClick: () -> Unit,
+    onOrderClick: (VideoSortOrder) -> Unit,
+    onLayoutModeClick: () -> Unit
 ) {
-    val spec = remember(tabs, selectedTabId, selectedSubTab) {
+    var expanded by remember(selectedTabId) { mutableStateOf(false) }
+    BoxWithConstraints(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(vertical = 5.dp)
+    ) {
+        val selectedTitle = remember(tabs, selectedTabId, selectedSubTab) {
+            tabs.firstOrNull { it.id == selectedTabId }?.title
+                ?: tabs.firstOrNull { it.subTab == selectedSubTab }?.title
+                ?: tabs.firstOrNull()?.title
+                ?: ""
+        }
+        val toolbarSpec = remember(maxWidth, selectedSubTab, tabs.size, selectedTitle) {
+            resolveSpaceContributionToolbarSpec(
+                widthDp = maxWidth.value.toInt(),
+                selectedSubTab = selectedSubTab,
+                tabCount = tabs.size,
+                selectedTitle = selectedTitle
+            )
+        }
+        SpaceContributionToolbarDock(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = toolbarSpec.horizontalPaddingDp.dp)
+        ) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                if (expanded) {
+                    Box(
+                        modifier = Modifier
+                            .weight(1f)
+                            .height(toolbarSpec.tabHeightDp.dp)
+                    ) {
+                        SpaceContributionExpandedTabRail(
+                            tabs = tabs,
+                            selectedTabId = selectedTabId,
+                            selectedSubTab = selectedSubTab,
+                            toolbarSpec = toolbarSpec,
+                            onSelect = { tabId ->
+                                onSelect(tabId)
+                                if (toolbarSpec.collapseAfterTabSelection) expanded = false
+                            },
+                            modifier = Modifier.fillMaxSize()
+                        )
+                    }
+                } else {
+                    SpaceContributionCollapsedTab(
+                        title = selectedTitle,
+                        toolbarSpec = toolbarSpec,
+                        onExpand = { expanded = true }
+                    )
+                }
+
+                if (toolbarSpec.showVideoActions) {
+                    SpaceContributionVideoToolbarActions(
+                        totalVideos = totalVideos,
+                        currentOrder = currentOrder,
+                        layoutMode = layoutMode,
+                        spec = toolbarSpec,
+                        onPlayAllClick = onPlayAllClick,
+                        onOrderClick = onOrderClick,
+                        onLayoutModeClick = onLayoutModeClick
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun SpaceContributionToolbarDock(
+    modifier: Modifier = Modifier,
+    content: @Composable ColumnScope.() -> Unit
+) {
+    Surface(
+        modifier = modifier,
+        shape = AppShapes.container(ContainerLevel.Pill),
+        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.22f),
+        tonalElevation = 0.dp,
+        shadowElevation = 0.dp
+    ) {
+        Column(
+            modifier = Modifier.padding(horizontal = 8.dp, vertical = 6.dp),
+            content = content
+        )
+    }
+}
+
+@Composable
+private fun SpaceContributionCollapsedTab(
+    title: String,
+    toolbarSpec: SpaceContributionToolbarSpec,
+    onExpand: () -> Unit
+) {
+    Box(
+        modifier = Modifier
+            .width(toolbarSpec.collapsedTabWidthDp.dp)
+            .height(toolbarSpec.tabHeightDp.dp)
+    ) {
+        BottomBarLiquidSegmentedControl(
+            items = listOf(title.ifBlank { "投稿" }),
+            selectedIndex = 0,
+            onSelected = {},
+            modifier = Modifier.matchParentSize(),
+            height = toolbarSpec.tabHeightDp.dp,
+            indicatorHeight = toolbarSpec.tabIndicatorHeightDp.dp,
+            labelFontSize = 13.sp,
+            containerHorizontalPadding = 3.dp,
+            containerVerticalPadding = 3.dp,
+            liquidGlassEffectsEnabled = true,
+            dragSelectionEnabled = false
+        )
+        Box(
+            modifier = Modifier
+                .matchParentSize()
+                .combinedClickable(
+                    onClick = {},
+                    onLongClick = onExpand
+                )
+        )
+    }
+}
+
+@Composable
+private fun SpaceContributionExpandedTabRail(
+    tabs: List<SpaceContributionTab>,
+    selectedTabId: String,
+    selectedSubTab: SpaceSubTab,
+    toolbarSpec: SpaceContributionToolbarSpec,
+    onSelect: (String) -> Unit,
+    modifier: Modifier = Modifier
+) {
+    val tabSpec = remember(tabs, selectedTabId, selectedSubTab) {
         resolveSpaceContributionTabChromeSpec(
             tabs = tabs,
             selectedTabId = selectedTabId,
             selectedSubTab = selectedSubTab
         )
     }
-    val safeSelectedIndex = spec.selectedIndex.coerceIn(0, (tabs.size - 1).coerceAtLeast(0))
+    val safeSelectedIndex = tabSpec.selectedIndex.coerceIn(0, (tabs.size - 1).coerceAtLeast(0))
     val scrollState = rememberScrollState()
     val density = LocalDensity.current
+    val textMeasurer = rememberTextMeasurer()
+    val labelTextStyle = MaterialTheme.typography.labelMedium.copy(
+        fontSize = 13.sp,
+        fontWeight = FontWeight.Medium
+    )
+    val minimumTouchTargetWidth = LocalViewConfiguration.current.minimumTouchTargetSize.width
+    val labelHorizontalPadding = minimumTouchTargetWidth / 2
+    val containerHorizontalPadding = 3.dp
 
-    BoxWithConstraints(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(horizontal = spec.horizontalPaddingDp.dp, vertical = 6.dp)
-    ) {
+    BoxWithConstraints(modifier = modifier.height(toolbarSpec.expandedTabRailHeightDp.dp)) {
         val viewportWidth = maxWidth
+        val tabWidths = remember(
+            tabs,
+            textMeasurer,
+            labelTextStyle,
+            density,
+            minimumTouchTargetWidth,
+            labelHorizontalPadding
+        ) {
+            tabs.map { tab ->
+                val textWidth = textMeasurer.measure(
+                    text = AnnotatedString(tab.title),
+                    style = labelTextStyle
+                ).size.width
+                val measuredWidth = with(density) { textWidth.toDp() } + labelHorizontalPadding
+                maxOf(measuredWidth, minimumTouchTargetWidth)
+            }
+        }
+        val expandedContentWidth = tabWidths.fold(containerHorizontalPadding * 2) { width, tabWidth ->
+            width + tabWidth
+        }
+        val shouldScrollTabs = tabSpec.scrollable || expandedContentWidth > viewportWidth
 
-        LaunchedEffect(spec.scrollable, safeSelectedIndex, spec.itemWidthDp, viewportWidth) {
-            val itemWidthDp = spec.itemWidthDp ?: return@LaunchedEffect
-            if (!spec.scrollable) return@LaunchedEffect
+        LaunchedEffect(shouldScrollTabs, safeSelectedIndex, tabWidths, viewportWidth) {
+            if (!shouldScrollTabs) return@LaunchedEffect
             val target = with(density) {
-                resolveSpaceContributionTabCenteredScrollOffsetPx(
-                    selectedIndex = safeSelectedIndex,
-                    itemWidthPx = itemWidthDp.dp.toPx(),
-                    viewportWidthPx = viewportWidth.toPx()
-                )
+                val selectedStartPx = tabWidths
+                    .take(safeSelectedIndex)
+                    .sumOf { it.toPx().toDouble() }
+                    .toFloat()
+                val selectedWidthPx = tabWidths.getOrNull(safeSelectedIndex)?.toPx() ?: 0f
+                (selectedStartPx - (viewportWidth.toPx() - selectedWidthPx) / 2f)
+                    .toInt()
+                    .coerceAtLeast(0)
             }
             scrollState.animateScrollTo(target)
         }
@@ -1966,35 +2237,61 @@ private fun SpaceContributionTabRow(
         Box(
             modifier = Modifier
                 .fillMaxWidth()
-                .then(if (spec.scrollable) Modifier.horizontalScroll(scrollState) else Modifier)
+                .then(if (shouldScrollTabs) Modifier.horizontalScroll(scrollState) else Modifier)
         ) {
-            BottomBarLiquidSegmentedControl(
-                items = tabs.map { it.title },
-                selectedIndex = safeSelectedIndex,
-                onSelected = { index ->
-                    tabs.getOrNull(index)?.let { onSelect(it.id) }
-                },
-                modifier = if (spec.scrollable) {
-                    Modifier
-                } else {
-                    Modifier.align(Alignment.Center)
-                },
-                itemWidth = spec.itemWidthDp?.dp,
-                height = spec.heightDp.dp,
-                indicatorHeight = spec.indicatorHeightDp.dp,
-                labelFontSize = 14.sp,
-                liquidGlassEffectsEnabled = spec.liquidGlassEffectsEnabled,
-                dragSelectionEnabled = spec.dragSelectionEnabled
-            )
+            Row(
+                modifier = Modifier
+                    .width(expandedContentWidth)
+                    .height(toolbarSpec.expandedTabRailHeightDp.dp)
+                    .padding(horizontal = containerHorizontalPadding),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                tabs.forEachIndexed { index, tab ->
+                    val selected = index == safeSelectedIndex
+                    Box(
+                        modifier = Modifier
+                            .width(tabWidths.getOrElse(index) { minimumTouchTargetWidth })
+                            .height(toolbarSpec.expandedTabRailHeightDp.dp)
+                            .clip(AppShapes.container(ContainerLevel.Pill))
+                            .clickable { onSelect(tab.id) },
+                        contentAlignment = Alignment.Center
+                    ) {
+                        if (selected) {
+                            Box(
+                                modifier = Modifier
+                                    .matchParentSize()
+                                    .padding(vertical = containerHorizontalPadding)
+                                    .background(
+                                        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.48f),
+                                        shape = AppShapes.container(ContainerLevel.Pill)
+                                    )
+                            )
+                        }
+                        Text(
+                            text = tab.title,
+                            style = labelTextStyle,
+                            color = if (selected) {
+                                MaterialTheme.colorScheme.primary
+                            } else {
+                                MaterialTheme.colorScheme.onSurface.copy(alpha = 0.78f)
+                            },
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                            textAlign = TextAlign.Center
+                        )
+                    }
+                }
+            }
         }
     }
 }
 
 @Composable
-private fun SpaceContributionVideoActions(
+private fun SpaceContributionVideoToolbarActions(
     totalVideos: Int,
     currentOrder: VideoSortOrder,
     layoutMode: SpaceContributionVideoLayoutMode,
+    spec: SpaceContributionToolbarSpec,
     onPlayAllClick: () -> Unit,
     onOrderClick: (VideoSortOrder) -> Unit,
     onLayoutModeClick: () -> Unit
@@ -2003,42 +2300,54 @@ private fun SpaceContributionVideoActions(
     val isSingleColumn = layoutMode == SpaceContributionVideoLayoutMode.SINGLE_COLUMN
 
     Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(horizontal = 16.dp, vertical = 8.dp),
         verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(10.dp)
+        horizontalArrangement = Arrangement.spacedBy(2.dp)
     ) {
-        Text(
-            text = "共${totalVideos}视频",
-            fontSize = 15.sp,
-            fontWeight = FontWeight.Normal,
-            color = MaterialTheme.colorScheme.onSurface
-        )
-
-        OutlinedButton(
-            onClick = onPlayAllClick,
-            shape = RoundedCornerShape(999.dp),
-            contentPadding = PaddingValues(horizontal = 14.dp, vertical = 8.dp),
-            colors = ButtonDefaults.outlinedButtonColors(
-                contentColor = MaterialTheme.colorScheme.primary
-            ),
-            border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant)
-        ) {
-            Icon(
-                imageVector = Icons.Outlined.PlayCircleOutline,
-                contentDescription = null,
-                modifier = Modifier.size(18.dp)
+        if (spec.showTotalText) {
+            Text(
+                text = "共${totalVideos}视频",
+                fontSize = 12.sp,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
             )
-            Spacer(modifier = Modifier.width(6.dp))
-            Text("播放全部", fontSize = 14.sp)
         }
 
-        Spacer(modifier = Modifier.weight(1f))
+        if (spec.showPlayAllText) {
+            TextButton(
+                onClick = onPlayAllClick,
+                modifier = Modifier.height(40.dp),
+                contentPadding = PaddingValues(horizontal = 8.dp)
+            ) {
+                Icon(
+                    imageVector = Icons.Outlined.PlayCircleOutline,
+                    contentDescription = null,
+                    modifier = Modifier.size(17.dp)
+                )
+                Spacer(modifier = Modifier.width(4.dp))
+                Text(
+                    text = "播放",
+                    fontSize = 13.sp,
+                    maxLines = 1,
+                    softWrap = false
+                )
+            }
+        } else {
+            IconButton(
+                onClick = onPlayAllClick,
+                modifier = Modifier.size(40.dp)
+            ) {
+                Icon(
+                    imageVector = Icons.Outlined.PlayCircleOutline,
+                    contentDescription = "播放全部",
+                    tint = MaterialTheme.colorScheme.primary
+                )
+            }
+        }
 
         IconButton(
             onClick = onLayoutModeClick,
-            modifier = Modifier.size(48.dp)
+            modifier = Modifier.size(40.dp)
         ) {
             Icon(
                 imageVector = if (isSingleColumn) Icons.Outlined.GridView else Icons.Outlined.ViewAgenda,
@@ -2048,18 +2357,38 @@ private fun SpaceContributionVideoActions(
         }
 
         Box {
-            TextButton(onClick = { menuExpanded = true }) {
-                Icon(
-                    imageVector = Icons.AutoMirrored.Outlined.Sort,
-                    contentDescription = null,
-                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                    modifier = Modifier.size(18.dp)
-                )
-                Spacer(modifier = Modifier.width(6.dp))
-                Text(
-                    text = currentOrder.displayName,
-                    color = MaterialTheme.colorScheme.onSurface
-                )
+            if (spec.showSortText) {
+                TextButton(
+                    onClick = { menuExpanded = true },
+                    modifier = Modifier.height(40.dp),
+                    contentPadding = PaddingValues(horizontal = 8.dp)
+                ) {
+                    Icon(
+                        imageVector = Icons.AutoMirrored.Outlined.Sort,
+                        contentDescription = null,
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.size(17.dp)
+                    )
+                    Spacer(modifier = Modifier.width(4.dp))
+                    Text(
+                        text = resolveSpaceVideoSortCompactLabel(currentOrder),
+                        color = MaterialTheme.colorScheme.onSurface,
+                        fontSize = 13.sp,
+                        maxLines = 1,
+                        softWrap = false
+                    )
+                }
+            } else {
+                IconButton(
+                    onClick = { menuExpanded = true },
+                    modifier = Modifier.size(40.dp)
+                ) {
+                    Icon(
+                        imageVector = Icons.AutoMirrored.Outlined.Sort,
+                        contentDescription = resolveSpaceVideoSortCompactLabel(currentOrder),
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
             }
 
             DropdownMenu(
@@ -2114,21 +2443,105 @@ private fun SpaceSectionHeader(
     }
 }
 
+@OptIn(ExperimentalSharedTransitionApi::class)
+@Composable
+private fun Modifier.spaceVideoCoverSharedBounds(
+    sharedTransitionKey: String? = null,
+    coverShape: RoundedCornerShape,
+    sharedTransitionScope: SharedTransitionScope? = null,
+    animatedVisibilityScope: AnimatedVisibilityScope? = null
+): Modifier {
+    val sourceRoute = LocalVideoCardSharedElementSourceRoute.current
+    val cardSharedTransitionMotionSpec = remember(sourceRoute, sharedTransitionKey) {
+        resolveVideoCardSharedTransitionMotionSpec(
+            sourceRoute = sourceRoute,
+            transitionEnabled = sharedTransitionKey != null
+        )
+    }
+    val sharedTransitionReady = sharedTransitionKey != null &&
+        sharedTransitionScope != null &&
+        animatedVisibilityScope != null
+    if (!sharedTransitionReady) return this
+    return with(requireNotNull(sharedTransitionScope)) {
+        this@spaceVideoCoverSharedBounds.sharedBounds(
+            sharedContentState = rememberSharedContentState(
+                key = videoCardShellSharedElementKey(
+                    bvid = requireNotNull(sharedTransitionKey),
+                    sourceRoute = sourceRoute
+                )
+            ),
+            animatedVisibilityScope = requireNotNull(animatedVisibilityScope),
+            boundsTransform = { _, _ ->
+                if (cardSharedTransitionMotionSpec.enabled) {
+                    tween(
+                        durationMillis = cardSharedTransitionMotionSpec.durationMillis,
+                        easing = cardSharedTransitionMotionSpec.easing
+                    )
+                } else {
+                    com.android.purebilibili.core.ui.motion.AppMotionTokens.spatialSpec()
+                }
+            },
+            clipInOverlayDuringTransition = OverlayClip(coverShape)
+        )
+    }
+}
+
+@OptIn(ExperimentalSharedTransitionApi::class)
 @Composable
 private fun SpaceHomeVideoCard(
     video: SpaceVideoItem,
-    onClick: () -> Unit
+    progressState: VideoProgressDisplayState,
+    badgeLabel: String? = null,
+    onClick: () -> Unit,
+    sharedTransitionKey: String? = null,
+    sharedTransitionScope: SharedTransitionScope? = null,
+    animatedVisibilityScope: AnimatedVisibilityScope? = null,
+    modifier: Modifier = Modifier
 ) {
+    val configuration = LocalConfiguration.current
+    val density = LocalDensity.current
+    val screenWidthPx = remember(configuration.screenWidthDp, density) {
+        with(density) { configuration.screenWidthDp.dp.toPx() }
+    }
+    val screenHeightPx = remember(configuration.screenHeightDp, density) {
+        with(density) { configuration.screenHeightDp.dp.toPx() }
+    }
+    val densityValue = density.density
+    val sourceRoute = LocalVideoCardSharedElementSourceRoute.current
+    var coverBounds by remember { mutableStateOf<androidx.compose.ui.geometry.Rect?>(null) }
+    val coverShape = RoundedCornerShape(14.dp)
+    val coverModifier = Modifier.spaceVideoCoverSharedBounds(
+        sharedTransitionKey = sharedTransitionKey,
+        coverShape = coverShape,
+        sharedTransitionScope = sharedTransitionScope,
+        animatedVisibilityScope = animatedVisibilityScope
+    )
+
     Column(
-        modifier = Modifier
+        modifier = modifier
             .padding(horizontal = 8.dp)
-            .clip(RoundedCornerShape(14.dp))
-            .clickable { onClick() }
+            .clip(coverShape)
+            .clickable {
+                coverBounds?.let { bounds ->
+                    CardPositionManager.recordVideoCardPosition(
+                        bvid = sharedTransitionKey.orEmpty(),
+                        sourceRoute = sourceRoute,
+                        bounds = bounds,
+                        screenWidth = screenWidthPx,
+                        screenHeight = screenHeightPx,
+                        density = densityValue
+                    )
+                }
+                onClick()
+            }
     ) {
         Box(
-            modifier = Modifier
+            modifier = coverModifier
+                .onGloballyPositioned { coordinates ->
+                    coverBounds = coordinates.boundsInRoot()
+                }
                 .fillMaxWidth()
-                .clip(RoundedCornerShape(14.dp))
+                .clip(coverShape)
                 .background(MaterialTheme.colorScheme.surfaceVariant)
         ) {
             AsyncImage(
@@ -2142,6 +2555,24 @@ private fun SpaceHomeVideoCard(
                     .fillMaxWidth()
                     .height(118.dp)
             )
+
+            if (!badgeLabel.isNullOrBlank()) {
+                Surface(
+                    modifier = Modifier
+                        .align(Alignment.TopStart)
+                        .padding(8.dp),
+                    shape = RoundedCornerShape(6.dp),
+                    color = MaterialTheme.colorScheme.primary
+                ) {
+                    Text(
+                        text = badgeLabel,
+                        modifier = Modifier.padding(horizontal = 7.dp, vertical = 3.dp),
+                        fontSize = 11.sp,
+                        fontWeight = FontWeight.SemiBold,
+                        color = MaterialTheme.colorScheme.onPrimary
+                    )
+                }
+            }
 
             Surface(
                 modifier = Modifier
@@ -2157,6 +2588,18 @@ private fun SpaceHomeVideoCard(
                     color = Color.White
                 )
             }
+
+            if (progressState.showProgressBar) {
+                LinearProgressIndicator(
+                    progress = { progressState.progressFraction },
+                    modifier = Modifier
+                        .align(Alignment.BottomCenter)
+                        .fillMaxWidth()
+                        .height(3.dp),
+                    color = MaterialTheme.colorScheme.primary,
+                    trackColor = Color.White.copy(alpha = 0.28f)
+                )
+            }
         }
 
         Spacer(modifier = Modifier.height(8.dp))
@@ -2169,25 +2612,80 @@ private fun SpaceHomeVideoCard(
             overflow = TextOverflow.Ellipsis,
             color = MaterialTheme.colorScheme.onSurface
         )
+        val metadata = remember(video.created, video.play, progressState.progressSec) {
+            buildList {
+                if (video.created > 0L) add(FormatUtils.formatPublishTime(video.created))
+                if (video.play > 0) add("${FormatUtils.formatStat(video.play.toLong())}播放")
+                if (progressState.progressSec == -1) add("已看完")
+            }.joinToString(" · ")
+        }
+        if (metadata.isNotBlank()) {
+            Spacer(modifier = Modifier.height(4.dp))
+            Text(
+                text = metadata,
+                fontSize = 12.sp,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
+            )
+        }
     }
 }
 
+@OptIn(ExperimentalSharedTransitionApi::class)
 @Composable
 private fun SpaceAggregateMediaCard(
     item: SpaceAggregateArchiveItem,
-    onClick: () -> Unit
+    onClick: () -> Unit,
+    sharedTransitionKey: String? = null,
+    sharedTransitionScope: SharedTransitionScope? = null,
+    animatedVisibilityScope: AnimatedVisibilityScope? = null
 ) {
+    val configuration = LocalConfiguration.current
+    val density = LocalDensity.current
+    val screenWidthPx = remember(configuration.screenWidthDp, density) {
+        with(density) { configuration.screenWidthDp.dp.toPx() }
+    }
+    val screenHeightPx = remember(configuration.screenHeightDp, density) {
+        with(density) { configuration.screenHeightDp.dp.toPx() }
+    }
+    val densityValue = density.density
+    val sourceRoute = LocalVideoCardSharedElementSourceRoute.current
+    var coverBounds by remember { mutableStateOf<androidx.compose.ui.geometry.Rect?>(null) }
+    val coverShape = RoundedCornerShape(14.dp)
+    val coverModifier = Modifier.spaceVideoCoverSharedBounds(
+        sharedTransitionKey = sharedTransitionKey,
+        coverShape = coverShape,
+        sharedTransitionScope = sharedTransitionScope,
+        animatedVisibilityScope = animatedVisibilityScope
+    )
+
     Column(
         modifier = Modifier
             .padding(horizontal = 8.dp)
-            .clip(RoundedCornerShape(14.dp))
-            .clickable { onClick() }
+            .clip(coverShape)
+            .clickable {
+                coverBounds?.let { bounds ->
+                    CardPositionManager.recordVideoCardPosition(
+                        bvid = sharedTransitionKey.orEmpty(),
+                        sourceRoute = sourceRoute,
+                        bounds = bounds,
+                        screenWidth = screenWidthPx,
+                        screenHeight = screenHeightPx,
+                        density = densityValue
+                    )
+                }
+                onClick()
+            }
     ) {
         Box(
-            modifier = Modifier
+            modifier = coverModifier
+                .onGloballyPositioned { coordinates ->
+                    coverBounds = coordinates.boundsInRoot()
+                }
                 .fillMaxWidth()
                 .height(118.dp)
-                .clip(RoundedCornerShape(14.dp))
+                .clip(coverShape)
                 .background(MaterialTheme.colorScheme.surfaceVariant)
         ) {
             AsyncImage(
@@ -2282,18 +2780,53 @@ private fun SpaceAggregatePosterCard(
     }
 }
 
+@OptIn(ExperimentalSharedTransitionApi::class)
 @Composable
 private fun SpaceTopVideoCard(
     video: SpaceTopArcData,
-    onClick: () -> Unit
+    onClick: () -> Unit,
+    sharedTransitionKey: String? = null,
+    sharedTransitionScope: SharedTransitionScope? = null,
+    animatedVisibilityScope: AnimatedVisibilityScope? = null
 ) {
+    val configuration = LocalConfiguration.current
+    val density = LocalDensity.current
+    val screenWidthPx = remember(configuration.screenWidthDp, density) {
+        with(density) { configuration.screenWidthDp.dp.toPx() }
+    }
+    val screenHeightPx = remember(configuration.screenHeightDp, density) {
+        with(density) { configuration.screenHeightDp.dp.toPx() }
+    }
+    val densityValue = density.density
+    val sourceRoute = LocalVideoCardSharedElementSourceRoute.current
+    var coverBounds by remember { mutableStateOf<androidx.compose.ui.geometry.Rect?>(null) }
+    val coverShape = RoundedCornerShape(12.dp)
+    val coverModifier = Modifier.spaceVideoCoverSharedBounds(
+        sharedTransitionKey = sharedTransitionKey,
+        coverShape = coverShape,
+        sharedTransitionScope = sharedTransitionScope,
+        animatedVisibilityScope = animatedVisibilityScope
+    )
+
     Column(
         modifier = Modifier
             .fillMaxWidth()
             .padding(horizontal = 16.dp)
             .clip(RoundedCornerShape(18.dp))
             .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.35f))
-            .clickable { onClick() }
+            .clickable {
+                coverBounds?.let { bounds ->
+                    CardPositionManager.recordVideoCardPosition(
+                        bvid = sharedTransitionKey.orEmpty(),
+                        sourceRoute = sourceRoute,
+                        bounds = bounds,
+                        screenWidth = screenWidthPx,
+                        screenHeight = screenHeightPx,
+                        density = densityValue
+                    )
+                }
+                onClick()
+            }
             .padding(14.dp)
     ) {
         Text(
@@ -2305,10 +2838,13 @@ private fun SpaceTopVideoCard(
         Spacer(modifier = Modifier.height(12.dp))
         Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
             Box(
-                modifier = Modifier
+                modifier = coverModifier
+                    .onGloballyPositioned { coordinates ->
+                        coverBounds = coordinates.boundsInRoot()
+                    }
                     .width(144.dp)
                     .height(90.dp)
-                    .clip(RoundedCornerShape(12.dp))
+                    .clip(coverShape)
                     .background(MaterialTheme.colorScheme.surfaceVariant)
             ) {
                 AsyncImage(
@@ -2384,10 +2920,13 @@ private fun SpaceArchiveListItemRow(
     publishTime: String,
     play: Long,
     secondaryCount: Long,
+    progressState: VideoProgressDisplayState? = null,
+    badgeLabel: String? = null,
     onClick: () -> Unit,
     sharedTransitionKey: String? = null,
     sharedTransitionScope: SharedTransitionScope? = null,
-    animatedVisibilityScope: AnimatedVisibilityScope? = null
+    animatedVisibilityScope: AnimatedVisibilityScope? = null,
+    modifier: Modifier = Modifier
 ) {
     val configuration = LocalConfiguration.current
     val density = LocalDensity.current
@@ -2398,6 +2937,13 @@ private fun SpaceArchiveListItemRow(
         with(density) { configuration.screenHeightDp.dp.toPx() }
     }
     val densityValue = density.density
+    val sourceRoute = LocalVideoCardSharedElementSourceRoute.current
+    val cardSharedTransitionMotionSpec = remember(sourceRoute, sharedTransitionKey) {
+        resolveVideoCardSharedTransitionMotionSpec(
+            sourceRoute = sourceRoute,
+            transitionEnabled = sharedTransitionKey != null
+        )
+    }
     var coverBounds by remember { mutableStateOf<androidx.compose.ui.geometry.Rect?>(null) }
     val coverWidth = 160.dp
     val coverHeight = coverWidth / VIDEO_SHARED_COVER_ASPECT_RATIO
@@ -2408,10 +2954,22 @@ private fun SpaceArchiveListItemRow(
     val coverModifier = if (sharedTransitionReady) {
         with(requireNotNull(sharedTransitionScope)) {
             Modifier.sharedBounds(
-                sharedContentState = rememberSharedContentState(key = "video_cover_$sharedTransitionKey"),
+                sharedContentState = rememberSharedContentState(
+                    key = videoCardShellSharedElementKey(
+                        bvid = requireNotNull(sharedTransitionKey),
+                        sourceRoute = sourceRoute
+                    )
+                ),
                 animatedVisibilityScope = requireNotNull(animatedVisibilityScope),
                 boundsTransform = { _, _ ->
-                    com.android.purebilibili.core.theme.AnimationSpecs.BiliPaiSpringSpec
+                    if (cardSharedTransitionMotionSpec.enabled) {
+                        tween(
+                            durationMillis = cardSharedTransitionMotionSpec.durationMillis,
+                            easing = cardSharedTransitionMotionSpec.easing
+                        )
+                    } else {
+                        com.android.purebilibili.core.ui.motion.AppMotionTokens.spatialSpec()
+                    }
                 },
                 clipInOverlayDuringTransition = OverlayClip(coverShape)
             )
@@ -2421,12 +2979,14 @@ private fun SpaceArchiveListItemRow(
     }
 
     Row(
-        modifier = Modifier
+        modifier = modifier
             .fillMaxWidth()
             .padding(horizontal = 16.dp)
             .clickable {
                 coverBounds?.let { bounds ->
-                    CardPositionManager.recordCardPosition(
+                    CardPositionManager.recordVideoCardPosition(
+                        bvid = sharedTransitionKey.orEmpty(),
+                        sourceRoute = sourceRoute,
                         bounds = bounds,
                         screenWidth = screenWidthPx,
                         screenHeight = screenHeightPx,
@@ -2457,6 +3017,23 @@ private fun SpaceArchiveListItemRow(
                 contentScale = ContentScale.Crop,
                 modifier = Modifier.fillMaxSize()
             )
+            if (!badgeLabel.isNullOrBlank()) {
+                Surface(
+                    modifier = Modifier
+                        .align(Alignment.TopStart)
+                        .padding(6.dp),
+                    shape = RoundedCornerShape(6.dp),
+                    color = MaterialTheme.colorScheme.primary
+                ) {
+                    Text(
+                        text = badgeLabel,
+                        modifier = Modifier.padding(horizontal = 7.dp, vertical = 3.dp),
+                        fontSize = 11.sp,
+                        fontWeight = FontWeight.SemiBold,
+                        color = MaterialTheme.colorScheme.onPrimary
+                    )
+                }
+            }
             if (duration.isNotBlank()) {
                 Surface(
                     modifier = Modifier
@@ -2473,6 +3050,17 @@ private fun SpaceArchiveListItemRow(
                     )
                 }
             }
+            if (progressState?.showProgressBar == true) {
+                LinearProgressIndicator(
+                    progress = { progressState.progressFraction },
+                    modifier = Modifier
+                        .align(Alignment.BottomCenter)
+                        .fillMaxWidth()
+                        .height(3.dp),
+                    color = MaterialTheme.colorScheme.primary,
+                    trackColor = Color.White.copy(alpha = 0.28f)
+                )
+            }
         }
 
         Column(
@@ -2485,10 +3073,14 @@ private fun SpaceArchiveListItemRow(
                 with(requireNotNull(sharedTransitionScope)) {
                     Modifier
                         .sharedBounds(
-                            sharedContentState = rememberSharedContentState(key = "video_title_$sharedTransitionKey"),
+                            sharedContentState = rememberSharedContentState(
+                                key = com.android.purebilibili.core.ui.transition.videoTitleSharedElementKey(
+                                    requireNotNull(sharedTransitionKey)
+                                )
+                            ),
                             animatedVisibilityScope = requireNotNull(animatedVisibilityScope),
                             boundsTransform = { _, _ ->
-                                com.android.purebilibili.core.theme.AnimationSpecs.BiliPaiSpringSpec
+                                com.android.purebilibili.core.ui.motion.AppMotionTokens.spatialSpec()
                             }
                         )
                 }
@@ -2522,7 +3114,7 @@ private fun SpaceArchiveListItemRow(
                 )
             }
             Text(
-                text = publishTime,
+                text = if (progressState?.progressSec == -1) "$publishTime · 已看完" else publishTime,
                 fontSize = 12.sp,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
@@ -2533,10 +3125,14 @@ private fun SpaceArchiveListItemRow(
                 val viewsModifier = if (sharedTransitionReady) {
                     with(requireNotNull(sharedTransitionScope)) {
                         Modifier.sharedBounds(
-                            sharedContentState = rememberSharedContentState(key = "video_views_$sharedTransitionKey"),
+                            sharedContentState = rememberSharedContentState(
+                                key = com.android.purebilibili.core.ui.transition.videoViewsSharedElementKey(
+                                    requireNotNull(sharedTransitionKey)
+                                )
+                            ),
                             animatedVisibilityScope = requireNotNull(animatedVisibilityScope),
                             boundsTransform = { _, _ ->
-                                com.android.purebilibili.core.theme.AnimationSpecs.BiliPaiSpringSpec
+                                com.android.purebilibili.core.ui.motion.AppMotionTokens.spatialSpec()
                             },
                             clipInOverlayDuringTransition = OverlayClip(RoundedCornerShape(4.dp))
                         )
@@ -2547,10 +3143,14 @@ private fun SpaceArchiveListItemRow(
                 val repliesModifier = if (sharedTransitionReady) {
                     with(requireNotNull(sharedTransitionScope)) {
                         Modifier.sharedBounds(
-                            sharedContentState = rememberSharedContentState(key = "video_danmaku_$sharedTransitionKey"),
+                            sharedContentState = rememberSharedContentState(
+                                key = com.android.purebilibili.core.ui.transition.videoDanmakuSharedElementKey(
+                                    requireNotNull(sharedTransitionKey)
+                                )
+                            ),
                             animatedVisibilityScope = requireNotNull(animatedVisibilityScope),
                             boundsTransform = { _, _ ->
-                                com.android.purebilibili.core.theme.AnimationSpecs.BiliPaiSpringSpec
+                                com.android.purebilibili.core.ui.motion.AppMotionTokens.spatialSpec()
                             },
                             clipInOverlayDuringTransition = OverlayClip(RoundedCornerShape(4.dp))
                         )
@@ -2649,6 +3249,18 @@ private fun SpaceAudioListItem(
             tint = MaterialTheme.colorScheme.primary,
             modifier = Modifier.size(28.dp)
         )
+    }
+}
+
+private fun dispatchSpaceArticleClick(
+    article: SpaceArticleItem,
+    onDynamicDetailClick: (String) -> Unit,
+    onArticleClick: (Long, String) -> Unit
+) {
+    when (val action = resolveSpaceArticleClickAction(article)) {
+        is SpaceDynamicClickAction.OpenDynamicDetail -> onDynamicDetailClick(action.dynamicId)
+        is SpaceDynamicClickAction.OpenArticle -> onArticleClick(action.articleId, action.title)
+        else -> Unit
     }
 }
 
@@ -2985,38 +3597,8 @@ private fun SpaceCollectionWithPreviewCard(
 }
 
 @Composable
-private fun SpaceOfficialTag(text: String) {
-    val colors = resolveSpaceOfficialTagColors(MaterialTheme.colorScheme)
-    Surface(
-        shape = RoundedCornerShape(999.dp),
-        color = colors.backgroundColor
-    ) {
-        Row(
-            modifier = Modifier.padding(horizontal = 12.dp, vertical = 5.dp),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Surface(
-                shape = CircleShape,
-                color = Color(0xFFFFC107)
-            ) {
-                Icon(
-                    imageVector = Icons.Outlined.Bolt,
-                    contentDescription = null,
-                    tint = Color.White,
-                    modifier = Modifier
-                        .padding(4.dp)
-                        .size(14.dp)
-                )
-            }
-            Spacer(modifier = Modifier.width(8.dp))
-            Text(
-                text = text,
-                fontSize = 12.sp,
-                fontWeight = FontWeight.SemiBold,
-                color = colors.textColor
-            )
-        }
-    }
+private fun SpaceOfficialTag(badge: OfficialVerifyBadgeSpec) {
+    OfficialVerifyBadge(badge = badge)
 }
 
 @Composable

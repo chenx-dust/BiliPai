@@ -34,4 +34,10 @@ class DrawerMotionBudgetPolicyTest {
             )
         )
     }
+
+    @Test
+    fun drawerTransition_forcesLowBlurBudget() {
+        assertTrue(shouldForceLowDrawerBlurBudget(DrawerMotionBudget.REDUCED))
+        assertFalse(shouldForceLowDrawerBlurBudget(DrawerMotionBudget.FULL))
+    }
 }

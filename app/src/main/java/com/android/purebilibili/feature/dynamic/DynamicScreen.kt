@@ -110,6 +110,7 @@ val LocalDynamicScrollChannel = compositionLocalOf<Channel<Unit>?> { null }
 @Composable
 fun DynamicScreen(
     viewModel: DynamicViewModel = viewModel(),
+    isCurrentPage: Boolean = true,
     onVideoClick: (String) -> Unit,
     onBangumiClick: (Long, Long) -> Unit = { _, _ -> },
     onDynamicDetailClick: (String) -> Unit = {},
@@ -176,6 +177,12 @@ fun DynamicScreen(
     val dynamicChromeBackdrop = rememberLayerBackdrop()
     val scope = rememberCoroutineScope()
 
+    LaunchedEffect(viewModel, isCurrentPage) {
+        if (isCurrentPage) {
+            viewModel.activateStartupLoads()
+        }
+    }
+
     val density = LocalDensity.current
     val statusBarHeight = WindowInsets.statusBars.getTop(density).let { with(density) { it.toDp() } }
     val dynamicListBottomPadding = resolveBottomSafeAreaPadding(
@@ -207,6 +214,24 @@ fun DynamicScreen(
         if (selectedTab != activeSelectedTab) {
             viewModel.setSelectedTab(activeSelectedTab)
         }
+    }
+    var previousFeedTab by remember { mutableIntStateOf(activeSelectedTab) }
+    var previousFeedSelectedUserId by remember {
+        mutableStateOf(selectedUserId.takeIf { isSelectedUserTabActive })
+    }
+    LaunchedEffect(activeSelectedTab, selectedUserId, isSelectedUserTabActive) {
+        val activeUserId = selectedUserId.takeIf { isSelectedUserTabActive }
+        if (shouldResetDynamicFeedScrollOnSourceChange(
+                previousTab = previousFeedTab,
+                nextTab = activeSelectedTab,
+                previousSelectedUserId = previousFeedSelectedUserId,
+                nextSelectedUserId = activeUserId
+            )
+        ) {
+            listState.scrollToItem(0)
+        }
+        previousFeedTab = activeSelectedTab
+        previousFeedSelectedUserId = activeUserId
     }
     val handleUserSelection = remember(selectedUserId, activeSelectedTab, isUserTabVisible, onUserClick) {
         { clickedUserId: Long? ->
@@ -1065,9 +1090,9 @@ private fun HorizontalUserList(
                 val isSelected = selectedUserId == user.uid
                 var showMenu by remember { mutableStateOf(false) }
                 val displayName = if (user.isHidden) {
-                    "${user.name.take(4)}(隐)"
+                    "${user.name}(隐)"
                 } else {
-                    user.name.take(4)
+                    user.name
                 }
 
                 Box {
@@ -1109,13 +1134,16 @@ private fun HorizontalUserList(
                         }
                         Spacer(modifier = Modifier.height(4.dp))
                         Text(
-                            displayName,  // 最多显示4个字符
+                            displayName,
                             fontSize = 11.sp,
                             color = if (isSelected)
                                 MaterialTheme.colorScheme.primary
                             else
                                 MaterialTheme.colorScheme.onSurfaceVariant,
-                            maxLines = 1
+                            maxLines = 1,
+                            overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
+                            textAlign = androidx.compose.ui.text.style.TextAlign.Center,
+                            modifier = Modifier.width(64.dp)
                         )
                     }
 

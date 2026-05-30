@@ -67,6 +67,25 @@ class BottomBarLayoutPolicyTest {
     }
 
     @Test
+    fun `kernelsu item slot width matches indicator geometry on crowded phones`() {
+        val slotWidth = resolveKernelSuBottomBarItemSlotWidth(
+            dockWidth = 353.dp,
+            horizontalPadding = 4.dp,
+            itemCount = 5
+        )
+
+        assertEquals(69.dp, slotWidth)
+        assertEquals(
+            314.5.dp,
+            resolveKernelSuBottomBarItemCenterX(
+                itemIndex = 4,
+                itemWidth = slotWidth,
+                horizontalPadding = 4.dp
+            )
+        )
+    }
+
+    @Test
     fun `kernelsu search entry shares safe floating width while collapsed`() {
         val layout = resolveKernelSuBottomBarSearchLayout(
             containerWidth = 393.dp,

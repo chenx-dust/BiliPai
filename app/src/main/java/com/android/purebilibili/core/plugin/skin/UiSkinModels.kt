@@ -35,14 +35,26 @@ data class UiSkinManifest(
 data class UiSkinAssets(
     val bottomBarTrim: String? = null,
     val topAtmosphere: String? = null,
+    val homeTopTabBackground: String? = null,
     val searchCapsuleBackground: String? = null,
+    val homeSideBackground: String? = null,
+    val homeProfileBackground: String? = null,
+    val homeProfileSquaredBackground: String? = null,
+    val homeChannelIcon: String? = null,
+    val homeChannelSelectedIcon: String? = null,
     val bottomBarIcons: Map<String, String> = emptyMap()
 ) {
     fun declaredPaths(): List<String> {
         return buildList {
             bottomBarTrim?.let(::add)
             topAtmosphere?.let(::add)
+            homeTopTabBackground?.let(::add)
             searchCapsuleBackground?.let(::add)
+            homeSideBackground?.let(::add)
+            homeProfileBackground?.let(::add)
+            homeProfileSquaredBackground?.let(::add)
+            homeChannelIcon?.let(::add)
+            homeChannelSelectedIcon?.let(::add)
             addAll(bottomBarIcons.values)
         }
     }
@@ -98,39 +110,6 @@ data class UiSkinState(
     val enabled: Boolean = false,
     val activeSkin: InstalledUiSkinPackage? = null
 )
-
-object BuiltInUiSkins {
-    val winterCloud = UiSkinManifest(
-        formatVersion = 1,
-        skinId = "builtin.winter_cloud",
-        displayName = "冬日云朵",
-        version = "1.0.0",
-        apiVersion = 1,
-        author = "BiliPai",
-        surfaces = setOf(UiSkinSurface.HOME_BOTTOM_BAR, UiSkinSurface.HOME_TOP_CHROME),
-        assets = UiSkinAssets(
-            bottomBarTrim = "builtin://winter-cloud/bottom-trim",
-            topAtmosphere = "builtin://winter-cloud/top-atmosphere"
-        ),
-        colors = UiSkinColorTokens(
-            bottomBarTrimTint = "#EAF8FF",
-            topAtmosphereTint = "#DFF5FF",
-            searchCapsuleTint = "#FFFFFF"
-        ),
-        styleSourceName = "BiliPai",
-        licenseNote = "BiliPai 原创内置资源",
-        communityShareable = false,
-        containsOfficialAssets = false
-    )
-
-    val winterCloudInstallRecord = InstalledUiSkinPackage(
-        manifest = winterCloud,
-        packageSha256 = "builtin",
-        packagePath = "builtin://winter-cloud",
-        installedAtMillis = 0L,
-        enabled = false
-    )
-}
 
 internal fun buildUiSkinInstallId(
     skinId: String,

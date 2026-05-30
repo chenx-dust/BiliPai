@@ -45,6 +45,7 @@ import com.android.purebilibili.feature.video.danmaku.DanmakuManager
 import com.android.purebilibili.feature.video.ui.components.AnimatedGesturePercentText
 import com.android.purebilibili.feature.video.ui.components.SponsorSkipButton
 import com.android.purebilibili.feature.video.ui.components.VideoAspectRatio
+import com.android.purebilibili.feature.video.ui.overlay.PlaybackDebugInfo
 import com.android.purebilibili.feature.video.ui.section.resolveSystemStreamVolumeFromGesture
 import com.android.purebilibili.feature.video.util.captureAndSaveVideoScreenshot
 import com.android.purebilibili.data.model.response.SponsorSegment
@@ -78,6 +79,7 @@ fun BangumiPlayerView(
     coverUrl: String = "",
     currentVideoUrl: String = "",
     currentAudioUrl: String = "",
+    debugInfo: PlaybackDebugInfo = PlaybackDebugInfo(),
     pages: List<Page> = emptyList(),
     currentPageIndex: Int = 0,
     onPageSelect: (Int) -> Unit = {},
@@ -104,11 +106,15 @@ fun BangumiPlayerView(
     danmakuSpeed: Float = 1.0f,
     danmakuDisplayArea: Float = 0.5f,
     danmakuMergeDuplicates: Boolean = true,
+    danmakuDuplicateMergeWindowMs: Int = 500,
+    danmakuDuplicateMergeCountThreshold: Int = 2,
     onDanmakuOpacityChange: (Float) -> Unit = {},
     onDanmakuFontScaleChange: (Float) -> Unit = {},
     onDanmakuSpeedChange: (Float) -> Unit = {},
     onDanmakuDisplayAreaChange: (Float) -> Unit = {},
     onDanmakuMergeDuplicatesChange: (Boolean) -> Unit = {},
+    onDanmakuDuplicateMergeWindowMsChange: (Int) -> Unit = {},
+    onDanmakuDuplicateMergeCountThresholdChange: (Int) -> Unit = {},
     isLiked: Boolean = false,
     coinCount: Int = 0,
     onToggleLike: () -> Unit = {},
@@ -364,6 +370,7 @@ fun BangumiPlayerView(
             coverUrl = coverUrl,
             currentVideoUrl = currentVideoUrl,
             currentAudioUrl = currentAudioUrl,
+            debugInfo = debugInfo,
             isVisible = showControls && gestureMode == BangumiGestureMode.None,
             onToggleVisible = { showControls = !showControls },
             isFullscreen = isFullscreen,
@@ -384,11 +391,15 @@ fun BangumiPlayerView(
             danmakuSpeed = danmakuSpeed,
             danmakuDisplayArea = danmakuDisplayArea,
             danmakuMergeDuplicates = danmakuMergeDuplicates,
+            danmakuDuplicateMergeWindowMs = danmakuDuplicateMergeWindowMs,
+            danmakuDuplicateMergeCountThreshold = danmakuDuplicateMergeCountThreshold,
             onDanmakuOpacityChange = onDanmakuOpacityChange,
             onDanmakuFontScaleChange = onDanmakuFontScaleChange,
             onDanmakuSpeedChange = onDanmakuSpeedChange,
             onDanmakuDisplayAreaChange = onDanmakuDisplayAreaChange,
             onDanmakuMergeDuplicatesChange = onDanmakuMergeDuplicatesChange,
+            onDanmakuDuplicateMergeWindowMsChange = onDanmakuDuplicateMergeWindowMsChange,
+            onDanmakuDuplicateMergeCountThresholdChange = onDanmakuDuplicateMergeCountThresholdChange,
             currentAspectRatio = currentAspectRatio,
             onAspectRatioChange = { currentAspectRatio = it },
             pages = pages,

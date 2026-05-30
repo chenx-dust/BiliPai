@@ -8,6 +8,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.RectangleShape
 import com.android.purebilibili.core.store.HomeSettings
+import com.android.purebilibili.core.store.HomeTopRightAction
 import com.android.purebilibili.core.ui.blur.BlurSurfaceType
 import com.android.purebilibili.feature.home.HomeGlassResolvedColors
 import com.android.purebilibili.core.ui.blur.BlurIntensity
@@ -21,6 +22,59 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class iOSHomeHeaderVisualPolicyTest {
+
+    @Test
+    fun `top right unread badge only appears for inbox action`() {
+        assertEquals("8", formatHomeTopRightUnreadBadge(HomeTopRightAction.INBOX, 8))
+        assertEquals("99+", formatHomeTopRightUnreadBadge(HomeTopRightAction.INBOX, 120))
+        assertEquals(null, formatHomeTopRightUnreadBadge(HomeTopRightAction.INBOX, 0))
+        assertEquals(null, formatHomeTopRightUnreadBadge(HomeTopRightAction.SETTINGS, 8))
+    }
+
+    @Test
+    fun `top right unread badge escapes icon center without clipping`() {
+        val layout = resolveHomeTopRightUnreadBadgeLayout()
+        val source = listOf(
+            File("app/src/main/java/com/android/purebilibili/feature/home/components/iOSHomeHeader.kt"),
+            File("src/main/java/com/android/purebilibili/feature/home/components/iOSHomeHeader.kt")
+        ).first { it.exists() }.readText()
+        val topRightButtonSource = source
+            .substringAfter("Spacer(modifier = Modifier.width(resolveHomeTopEdgeControlGap")
+            .substringBefore("if (drawTopSearchDivider)")
+
+        assertEquals(0.dp, layout.offsetX)
+        assertEquals(0.dp, layout.offsetY)
+        assertEquals(9.dp, layout.reservedEndWidth)
+        assertEquals(18.dp, layout.minWidth)
+        assertEquals(18.dp, layout.minHeight)
+        assertEquals(5.dp, layout.horizontalPadding)
+        assertEquals(1.dp, layout.verticalPadding)
+        assertTrue(topRightButtonSource.contains("resolveHomeTopRightActionSlotWidth"))
+        assertTrue(topRightButtonSource.contains(".size(topRightActionButtonSize)"))
+        assertTrue(topRightButtonSource.contains("Box("))
+        assertTrue(topRightButtonSource.contains(".clip(edgeButtonShape)"))
+        assertTrue(topRightButtonSource.contains("topRightUnreadBadgeLayout.offsetX"))
+    }
+
+    @Test
+    fun `top right inbox content description includes unread count`() {
+        assertEquals(
+            "消息，8 条未读",
+            resolveHomeTopRightActionContentDescription(HomeTopRightAction.INBOX, 8)
+        )
+        assertEquals(
+            "消息，99+ 条未读",
+            resolveHomeTopRightActionContentDescription(HomeTopRightAction.INBOX, 120)
+        )
+        assertEquals(
+            HomeTopRightAction.INBOX.label,
+            resolveHomeTopRightActionContentDescription(HomeTopRightAction.INBOX, 0)
+        )
+        assertEquals(
+            HomeTopRightAction.SETTINGS.label,
+            resolveHomeTopRightActionContentDescription(HomeTopRightAction.SETTINGS, 8)
+        )
+    }
 
     @Test
     fun `wide liquid glass chrome prefers flat treatment to avoid center seam`() {
@@ -1614,21 +1668,39 @@ class iOSHomeHeaderVisualPolicyTest {
     }
 
     @Test
-    fun `home header skin top tabs use flat official skin style`() {
+    fun `home header skin top tabs keep host readability and only pass sticker icons`() {
         val headerSource = loadSource("app/src/main/java/com/android/purebilibili/feature/home/components/iOSHomeHeader.kt")
         val topBarSource = loadSource("app/src/main/java/com/android/purebilibili/feature/home/components/TopBar.kt")
 
         assertTrue(headerSource.contains("val shouldUseSkinPlainTopTabs = shouldUseHomeSkinPlainTopTabs(uiSkinDecoration)"))
-        assertTrue(headerSource.contains("val tabRowHeightDp = if (shouldUseSkinPlainTopTabs)"))
-        assertTrue(headerSource.contains("resolveHomeSkinTopTabRowHeight()"))
-        assertTrue(headerSource.contains("val effectiveContinuousSlabRenderMode = if (shouldUseSkinPlainTopTabs)"))
-        assertTrue(headerSource.contains("drawChromeSurface = !shouldUseSkinPlainTopTabs"))
         assertTrue(headerSource.contains("skinPlainStyle = shouldUseSkinPlainTopTabs"))
+        assertTrue(headerSource.contains("topTabSkinIconPaths = uiSkinDecoration?.topTabSkinIconPaths.orEmpty()"))
+        assertTrue(headerSource.contains("partitionSkinIconPath = uiSkinDecoration?.topTabPartitionIconPath()"))
+        assertFalse(headerSource.contains("val topTabBackgroundImagePath = uiSkinDecoration?.topTabBackgroundImagePath"))
+        assertFalse(headerSource.contains("model = File(topTabBackgroundImagePath)"))
+        assertFalse(headerSource.contains("val tabRowHeightDp = if (shouldUseSkinPlainTopTabs)"))
         assertTrue(topBarSource.contains("val effectiveRenderer = if (skinPlainStyle) HomeTopTabRenderer.MD3 else renderer"))
-        assertTrue(topBarSource.contains("if (!skinPlainStyle && presetStyle.renderer == HomeTopTabRenderer.MIUIX)"))
-        assertTrue(topBarSource.contains("skinPlainStyle -> Color.Transparent"))
-        assertTrue(topBarSource.contains("resolveHomeSkinTopTabIndicatorColor(skinPlainContentColor)"))
-        assertTrue(topBarSource.contains("if (skinPlainStyle) {\n                            Modifier\n                        } else {\n                            Modifier.clip"))
+        assertTrue(topBarSource.contains("if (!hasSkinStickerIcons && !skinPlainStyle && presetStyle.renderer == HomeTopTabRenderer.MIUIX)"))
+    }
+
+    @Test
+    fun `home screen passes android native variant into top reserved padding`() {
+        val homeScreenSource = loadSource("app/src/main/java/com/android/purebilibili/feature/home/HomeScreen.kt")
+        val reservedPaddingCall = homeScreenSource
+            .substringAfter("val listTopPadding = resolveHomeTopReservedListPadding(")
+            .substringBefore(")")
+
+        assertTrue(reservedPaddingCall.contains("androidNativeVariant = androidNativeVariant"))
+    }
+
+    @Test
+    fun `home header settings button uses preset aware sizing`() {
+        val headerSource = loadSource("app/src/main/java/com/android/purebilibili/feature/home/components/iOSHomeHeader.kt")
+
+        assertTrue(headerSource.contains("val topRightActionButtonSize = resolveHomeTopSettingsButtonSize(uiPreset, androidNativeVariant)"))
+        assertTrue(headerSource.contains(".size(topRightActionButtonSize)"))
+        assertTrue(headerSource.contains("modifier = Modifier.size(resolveHomeTopSettingsIconSize(uiPreset, androidNativeVariant))"))
+        assertFalse(headerSource.contains(".size(resolveHomeTopSettingsButtonSize())"))
     }
 
     @Test

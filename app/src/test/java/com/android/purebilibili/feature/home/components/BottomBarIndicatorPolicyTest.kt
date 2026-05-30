@@ -1,6 +1,7 @@
 package com.android.purebilibili.feature.home.components
 
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.luminance
 import com.android.purebilibili.core.store.BottomBarLiquidGlassPreset
 import com.android.purebilibili.core.store.LiquidGlassMode
 import com.android.purebilibili.core.ui.motion.BottomBarMotionProfile
@@ -115,8 +116,8 @@ class BottomBarIndicatorPolicyTest {
     }
 
     @Test
-    fun `transitioning bottom pager disables hidden refraction capture`() {
-        assertFalse(
+    fun `transitioning bottom pager keeps hidden refraction capture during tap pulse`() {
+        assertTrue(
             shouldRenderBottomBarRefractionCapture(
                 glassEnabled = true,
                 hasBackdrop = true,
@@ -124,6 +125,16 @@ class BottomBarIndicatorPolicyTest {
                 isTransitionRunning = true,
                 isFeedScrollInProgress = false,
                 isBottomBarInteractionActive = true
+            )
+        )
+        assertFalse(
+            shouldRenderBottomBarRefractionCapture(
+                glassEnabled = true,
+                hasBackdrop = true,
+                captureProgress = 1f,
+                isTransitionRunning = true,
+                isFeedScrollInProgress = false,
+                isBottomBarInteractionActive = false
             )
         )
         assertTrue(
@@ -161,6 +172,50 @@ class BottomBarIndicatorPolicyTest {
     }
 
     @Test
+    fun `transitioning bottom pager allows indicator backdrop only for click pulse`() {
+        assertTrue(
+            shouldRenderBottomBarIndicatorBackdrop(
+                glassEnabled = true,
+                hasContentBackdrop = true,
+                indicatorProgress = 1f,
+                isTransitionRunning = true,
+                isBottomBarInteractionActive = true,
+                allowTransitionIndicatorPulse = true
+            )
+        )
+        assertTrue(
+            shouldRenderBottomBarRefractionCapture(
+                glassEnabled = true,
+                hasBackdrop = true,
+                captureProgress = 1f,
+                isTransitionRunning = true,
+                isBottomBarInteractionActive = true
+            )
+        )
+    }
+
+    @Test
+    fun `indicator click settle pulse reuses indicator layer transform scale`() {
+        val pressed = resolveBottomBarIndicatorLayerTransform(
+            motionProgress = 1f,
+            velocityItemsPerSecond = 0f,
+            isDragging = false,
+            dragScaleProgress = 1f
+        )
+        val settled = resolveBottomBarIndicatorLayerTransform(
+            motionProgress = 0f,
+            velocityItemsPerSecond = 0f,
+            isDragging = false,
+            dragScaleProgress = 0f
+        )
+
+        assertTrue(pressed.scaleX >= 1.35f)
+        assertEquals(pressed.scaleX, pressed.scaleY)
+        assertEquals(1f, settled.scaleX)
+        assertEquals(1f, settled.scaleY)
+    }
+
+    @Test
     fun `idle bottom bar does not render hidden capture or indicator backdrop`() {
         assertFalse(
             shouldRenderBottomBarRefractionCapture(
@@ -179,6 +234,40 @@ class BottomBarIndicatorPolicyTest {
                 indicatorProgress = 1f,
                 isTransitionRunning = false,
                 isBottomBarInteractionActive = false
+            )
+        )
+    }
+
+    @Test
+    fun `transparent glass preset keeps idle background refraction without content capture`() {
+        assertFalse(
+            shouldRenderBottomBarRefractionCapture(
+                glassEnabled = true,
+                hasBackdrop = true,
+                captureProgress = 1f,
+                isTransitionRunning = false,
+                isFeedScrollInProgress = false,
+                isBottomBarInteractionActive = false
+            )
+        )
+        assertTrue(
+            shouldRenderBottomBarIndicatorBackdrop(
+                glassEnabled = true,
+                hasContentBackdrop = true,
+                indicatorProgress = 1f,
+                isTransitionRunning = false,
+                isBottomBarInteractionActive = false,
+                allowIdleGlassEffect = true
+            )
+        )
+        assertFalse(
+            shouldRenderBottomBarIndicatorBackdrop(
+                glassEnabled = true,
+                hasContentBackdrop = true,
+                indicatorProgress = 1f,
+                isTransitionRunning = true,
+                isBottomBarInteractionActive = false,
+                allowIdleGlassEffect = true
             )
         )
     }
@@ -335,28 +424,28 @@ class BottomBarIndicatorPolicyTest {
     }
 
     @Test
-    fun `backdrop native preset damps bilipai horizontal refraction motion`() {
+    fun `bilipai tuned preset keeps original horizontal refraction motion`() {
         val profile = resolveBottomBarRefractionMotionProfile(
             position = 1.32f,
             velocity = 860f,
             isDragging = true
         )
         val effectiveProfile = resolveBottomBarEffectiveRefractionMotionProfile(
-            preset = BottomBarLiquidGlassPreset.BACKDROP_NATIVE,
+            preset = BottomBarLiquidGlassPreset.BILIPAI_TUNED,
             profile = profile
         )
 
         assertEquals(profile.progress, effectiveProfile.progress, 0.001f)
-        assertTrue(effectiveProfile.exportPanelOffsetFraction < profile.exportPanelOffsetFraction)
-        assertTrue(effectiveProfile.indicatorPanelOffsetFraction < profile.indicatorPanelOffsetFraction)
-        assertEquals(0f, effectiveProfile.visiblePanelOffsetFraction, 0.001f)
-        assertTrue(effectiveProfile.visibleSelectionEmphasis > profile.visibleSelectionEmphasis)
-        assertTrue(effectiveProfile.exportSelectionEmphasis > profile.exportSelectionEmphasis)
-        assertEquals(1f, effectiveProfile.exportCaptureWidthScale, 0.001f)
-        assertFalse(effectiveProfile.forceChromaticAberration)
-        assertEquals(1f, effectiveProfile.indicatorLensAmountScale, 0.001f)
-        assertEquals(1f, effectiveProfile.indicatorLensHeightScale, 0.001f)
-        assertEquals(1f, effectiveProfile.chromaticBoostScale, 0.001f)
+        assertEquals(profile.exportPanelOffsetFraction, effectiveProfile.exportPanelOffsetFraction, 0.001f)
+        assertEquals(profile.indicatorPanelOffsetFraction, effectiveProfile.indicatorPanelOffsetFraction, 0.001f)
+        assertEquals(profile.visiblePanelOffsetFraction, effectiveProfile.visiblePanelOffsetFraction, 0.001f)
+        assertEquals(profile.visibleSelectionEmphasis, effectiveProfile.visibleSelectionEmphasis, 0.001f)
+        assertEquals(profile.exportSelectionEmphasis, effectiveProfile.exportSelectionEmphasis, 0.001f)
+        assertEquals(profile.exportCaptureWidthScale, effectiveProfile.exportCaptureWidthScale, 0.001f)
+        assertEquals(profile.forceChromaticAberration, effectiveProfile.forceChromaticAberration)
+        assertEquals(profile.indicatorLensAmountScale, effectiveProfile.indicatorLensAmountScale, 0.001f)
+        assertEquals(profile.indicatorLensHeightScale, effectiveProfile.indicatorLensHeightScale, 0.001f)
+        assertEquals(profile.chromaticBoostScale, effectiveProfile.chromaticBoostScale, 0.001f)
     }
 
     @Test
@@ -367,32 +456,6 @@ class BottomBarIndicatorPolicyTest {
         assertEquals(0f, idle, 0.001f)
         assertTrue(idle < moving)
         assertEquals(1f, moving, 0.001f)
-    }
-
-    @Test
-    fun `vertical glass motion is neutral when glass is disabled`() {
-        val profile = resolveBottomBarVerticalGlassMotionProfile(
-            scrollOffsetPx = 600f,
-            glassEnabled = false
-        )
-
-        assertEquals(0f, profile.progress, 0.001f)
-    }
-
-    @Test
-    fun `vertical glass motion only resolves backdrop preset progress`() {
-        val idle = resolveBottomBarVerticalGlassMotionProfile(
-            scrollOffsetPx = 0f,
-            glassEnabled = true
-        )
-        val scrolled = resolveBottomBarVerticalGlassMotionProfile(
-            scrollOffsetPx = 180f,
-            glassEnabled = true
-        )
-
-        assertEquals(0f, idle.progress, 0.001f)
-        assertTrue(scrolled.progress > idle.progress)
-        assertEquals(1f, scrolled.progress, 0.001f)
     }
 
     @Test
@@ -425,7 +488,8 @@ class BottomBarIndicatorPolicyTest {
             0.72f,
             resolveBottomBarIndicatorGlowAlpha(
                 glassEnabled = true,
-                pressProgress = 0.72f
+                pressProgress = 0.72f,
+                motionProgress = 0f
             ),
             0.001f
         )
@@ -433,7 +497,8 @@ class BottomBarIndicatorPolicyTest {
             1f,
             resolveBottomBarIndicatorGlowAlpha(
                 glassEnabled = true,
-                pressProgress = 1.4f
+                pressProgress = 1.4f,
+                motionProgress = 0f
             ),
             0.001f
         )
@@ -441,7 +506,80 @@ class BottomBarIndicatorPolicyTest {
             0f,
             resolveBottomBarIndicatorGlowAlpha(
                 glassEnabled = false,
-                pressProgress = 1f
+                pressProgress = 1f,
+                motionProgress = 1f
+            ),
+            0.001f
+        )
+    }
+
+    @Test
+    fun `indicator glow follows drag motion even without press progress`() {
+        assertEquals(
+            0.64f,
+            resolveBottomBarIndicatorGlowAlpha(
+                glassEnabled = true,
+                pressProgress = 0f,
+                motionProgress = 0.64f
+            ),
+            0.001f
+        )
+    }
+
+    @Test
+    fun `shell highlight follows indicator motion while dragging`() {
+        assertEquals(
+            0.86f,
+            resolveBottomBarShellHighlightAlpha(
+                glassEnabled = true,
+                pressProgress = 0.12f,
+                motionProgress = 0.86f
+            ),
+            0.001f
+        )
+        assertEquals(
+            0.72f,
+            resolveBottomBarShellHighlightAlpha(
+                glassEnabled = true,
+                pressProgress = 0.72f,
+                motionProgress = 0.18f
+            ),
+            0.001f
+        )
+    }
+
+    @Test
+    fun `shell highlight keeps a floor while dragging so it stays pinned`() {
+        // 慢拖时 press/motion 都低,但拖拽中高光应保持可见(跟手)
+        assertEquals(
+            0.6f,
+            resolveBottomBarShellHighlightAlpha(
+                glassEnabled = true,
+                pressProgress = 0.1f,
+                motionProgress = 0.2f,
+                isDragging = true
+            ),
+            0.001f
+        )
+        // 非拖拽时无地板,沿用 max(press, motion)
+        assertEquals(
+            0.2f,
+            resolveBottomBarShellHighlightAlpha(
+                glassEnabled = true,
+                pressProgress = 0.1f,
+                motionProgress = 0.2f,
+                isDragging = false
+            ),
+            0.001f
+        )
+        // 高 motion 不被地板压低
+        assertEquals(
+            0.9f,
+            resolveBottomBarShellHighlightAlpha(
+                glassEnabled = true,
+                pressProgress = 0f,
+                motionProgress = 0.9f,
+                isDragging = true
             ),
             0.001f
         )
@@ -468,7 +606,7 @@ class BottomBarIndicatorPolicyTest {
         ).first { it.exists() }.readText()
         val highlightModifierSource = source
             .substringAfter("private fun Modifier.bottomBarInteractiveHighlight(")
-            .substringBefore("internal fun resolveBottomBarVerticalGlassMotionProfile(")
+            .substringBefore("internal fun resolveBottomBarBackdropPresetCaptureLens(")
 
         assertTrue(highlightModifierSource.indexOf("drawContent()") >= 0)
         assertTrue(
@@ -489,33 +627,6 @@ class BottomBarIndicatorPolicyTest {
         assertTrue(transform.scaleX > 1f)
         assertTrue(transform.scaleY > 1f)
         assertEquals(transform.scaleX, transform.scaleY, 0.001f)
-    }
-
-    @Test
-    fun `backdrop native surface stays frosted without jelly distortion`() {
-        val idle = resolveBottomBarBackdropNativeSurfaceSpec(
-            blurRadiusDp = 18f,
-            verticalProgress = 0f
-        )
-        val scrolled = resolveBottomBarBackdropNativeSurfaceSpec(
-            blurRadiusDp = 18f,
-            verticalProgress = 1f
-        )
-
-        assertTrue(idle.blurRadiusDp <= 7.2f)
-        assertTrue(scrolled.blurRadiusDp >= idle.blurRadiusDp)
-        assertTrue(scrolled.refractionHeightDp > idle.refractionHeightDp)
-        assertTrue(scrolled.refractionAmountDp > idle.refractionAmountDp)
-        assertTrue(idle.refractionHeightDp >= 16f)
-        assertTrue(idle.refractionAmountDp >= 14f)
-        assertTrue(scrolled.refractionHeightDp <= 26f)
-        assertTrue(scrolled.refractionAmountDp <= 22f)
-        assertTrue(scrolled.surfaceAlphaMultiplier < idle.surfaceAlphaMultiplier)
-        assertTrue(idle.surfaceAlphaMultiplier <= 0.58f)
-        assertTrue(scrolled.surfaceAlphaMultiplier <= 0.42f)
-        assertTrue(scrolled.highlightAlpha > idle.highlightAlpha)
-        assertTrue(scrolled.shadowAlpha > idle.shadowAlpha)
-        assertFalse(scrolled.chromaticAberration)
     }
 
     @Test
@@ -545,8 +656,8 @@ class BottomBarIndicatorPolicyTest {
             motionSpec = resolveBottomBarMotionSpec(BottomBarMotionProfile.ANDROID_NATIVE_FLOATING)
         )
 
-        assertTrue(transform.scaleX > 1.5f)
-        assertTrue(transform.scaleY > 1.5f)
+        assertEquals(88f / 56f, transform.scaleX, 0.001f)
+        assertEquals(88f / 56f, transform.scaleY, 0.001f)
     }
 
     @Test
@@ -572,8 +683,8 @@ class BottomBarIndicatorPolicyTest {
 
         assertEquals(full.scaleX, partial.scaleX, 0.001f)
         assertEquals(full.scaleY, partial.scaleY, 0.001f)
-        assertTrue(partial.scaleX > 1.5f)
-        assertTrue(partial.scaleY > 1.5f)
+        assertEquals(88f / 56f, partial.scaleX, 0.001f)
+        assertEquals(88f / 56f, partial.scaleY, 0.001f)
         assertTrue(deformed.scaleX > partial.scaleX)
         assertTrue(deformed.scaleY < partial.scaleY)
     }
@@ -858,6 +969,23 @@ class BottomBarIndicatorPolicyTest {
 
         assertTrue(resolveBottomBarItemMotionScale(dynamic, motionProgress = 1f) > 1f)
         assertTrue(resolveBottomBarItemMotionScale(home, motionProgress = 1f) > 1f)
+    }
+
+    @Test
+    fun `sampled item scale follows press progress even before indicator covers the tab`() {
+        val notCoveredScale = resolveBottomBarSampledItemMotionScale(
+            coverage = 0f,
+            motionProgress = 1f,
+            pressProgress = 1f
+        )
+        val partiallyCoveredScale = resolveBottomBarSampledItemMotionScale(
+            coverage = 0.25f,
+            motionProgress = 1f,
+            pressProgress = 1f
+        )
+
+        assertEquals(1.2f, notCoveredScale, 0.001f)
+        assertEquals(1.2f, partiallyCoveredScale, 0.001f)
     }
 
     @Test

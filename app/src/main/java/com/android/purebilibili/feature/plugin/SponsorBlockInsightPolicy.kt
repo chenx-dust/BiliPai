@@ -166,6 +166,18 @@ internal fun buildSponsorBlockDailySummaryNotification(
     )
 }
 
+internal fun buildSponsorBlockTestNotification(
+    config: SponsorBlockConfig
+): SponsorBlockDailySummaryNotification {
+    val prefix = config.dailySummaryNotificationPrefix.ifBlank {
+        SponsorBlockConfig.DEFAULT_DAILY_SUMMARY_PREFIX
+    }
+    return SponsorBlockDailySummaryNotification(
+        title = "空降助手测试通知",
+        body = "$prefix 1 次，累计 30 秒"
+    )
+}
+
 internal fun formatSponsorBlockPosition(positionMs: Long): String {
     val totalSeconds = (positionMs.coerceAtLeast(0L) / 1000L).toInt()
     val minutes = totalSeconds / 60

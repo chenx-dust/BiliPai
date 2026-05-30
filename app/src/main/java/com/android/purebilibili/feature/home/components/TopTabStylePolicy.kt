@@ -55,6 +55,7 @@ data class HomeTopPresetStyle(
     val unifiedPanelHorizontalPadding: Dp get() = panel.horizontalPadding
     val unifiedPanelInnerPadding: Dp get() = panel.innerPadding
     val unifiedPanelCornerRadius: Dp get() = panel.cornerRadius
+    val reservedContentBottomGap: Dp get() = panel.reservedContentBottomGap
     val embeddedTabHorizontalPadding: Dp get() = spacing.embeddedTabHorizontalPadding
     val tabHorizontalPaddingDocked: Dp get() = tabs.horizontalPadding.docked
     val tabHorizontalPaddingFloating: Dp get() = tabs.horizontalPadding.floating
@@ -90,7 +91,8 @@ data class HomeTopPanelStyle(
     val showDivider: Boolean,
     val horizontalPadding: Dp,
     val innerPadding: Dp,
-    val cornerRadius: Dp
+    val cornerRadius: Dp,
+    val reservedContentBottomGap: Dp
 )
 
 data class HomeTopSpacingStyle(
@@ -147,7 +149,8 @@ internal fun resolveHomeTopPresetStyle(
                     showDivider = false,
                     horizontalPadding = 0.dp,
                     innerPadding = 6.dp,
-                    cornerRadius = 32.dp
+                    cornerRadius = 32.dp,
+                    reservedContentBottomGap = 5.dp
                 ),
                 spacing = HomeTopSpacingStyle(
                     edgeControlGap = 6.dp,
@@ -212,7 +215,8 @@ internal fun resolveHomeTopPresetStyle(
                     showDivider = false,
                     horizontalPadding = 0.dp,
                     innerPadding = 9.dp,
-                    cornerRadius = 18.dp
+                    cornerRadius = 18.dp,
+                    reservedContentBottomGap = 12.dp
                 ),
                 spacing = HomeTopSpacingStyle(
                     edgeControlGap = 7.dp,
@@ -269,7 +273,8 @@ internal fun resolveHomeTopPresetStyle(
                     showDivider = true,
                     horizontalPadding = 0.dp,
                     innerPadding = 10.dp,
-                    cornerRadius = 16.dp
+                    cornerRadius = 16.dp,
+                    reservedContentBottomGap = 5.dp
                 ),
                 spacing = HomeTopSpacingStyle(
                     edgeControlGap = 8.dp,
@@ -470,6 +475,12 @@ internal fun resolveMiuixTopTabActionColors(
 }
 
 internal fun resolveMiuixTopTabRowVerticalInset(): Dp = 2.dp
+
+internal fun resolveMiuixTopTabRowHorizontalPadding(): Dp = 4.dp
+
+internal fun resolveMiuixTopTabActionTrailingPadding(panelInnerPadding: Dp): Dp {
+    return (panelInnerPadding - resolveMiuixTopTabRowHorizontalPadding()).coerceAtLeast(0.dp)
+}
 
 internal fun resolveMiuixTopTabContentHeight(rowHeight: Dp): Dp {
     val contentHeight = rowHeight - (resolveMiuixTopTabRowVerticalInset() * 2)

@@ -81,6 +81,7 @@ class DynamicViewModel(application: Application) : AndroidViewModel(application)
     private var isFollowingsLoading: Boolean = false
     private var cacheSaveJob: Job? = null
     private var startupFollowingsHydrationScheduled: Boolean = false
+    private var startupLoadsActivated: Boolean = false
 
     private val _uiState = MutableStateFlow(DynamicUiState())
     val uiState: StateFlow<DynamicUiState> = _uiState.asStateFlow()
@@ -123,7 +124,6 @@ class DynamicViewModel(application: Application) : AndroidViewModel(application)
     val selectedTab: StateFlow<Int> = _selectedTab.asStateFlow()
 
     init {
-        val startupPlan = resolveDynamicStartupLoadPlan()
         viewModelScope.launch {
             SettingsManager.getIncrementalTimelineRefresh(appContext).collect { enabled ->
                 incrementalTimelineRefreshEnabled = enabled
@@ -133,7 +133,12 @@ class DynamicViewModel(application: Application) : AndroidViewModel(application)
         loadCachedDynamics()
         rebuildFollowedUsers()
         observeFollowStateChanges()
-        refreshInBackground(startupPlan)
+    }
+
+    fun activateStartupLoads() {
+        if (startupLoadsActivated) return
+        startupLoadsActivated = true
+        refreshInBackground(resolveDynamicStartupLoadPlan())
     }
 
     private fun observeFollowStateChanges() {
@@ -634,12 +639,20 @@ class DynamicViewModel(application: Application) : AndroidViewModel(application)
             savedTab = tab,
             tabCount = DYNAMIC_TOP_TAB_COUNT
         )
-        if (_selectedTab.value == resolvedTab) return
+        val previousSelectedUserId = _selectedUserId.value
+        val nextSelectedUserId = resolveDynamicSelectedUserForTab(
+            selectedTab = resolvedTab,
+            selectedUserId = previousSelectedUserId
+        )
+        if (_selectedTab.value == resolvedTab && previousSelectedUserId == nextSelectedUserId) return
+        if (previousSelectedUserId != nextSelectedUserId) {
+            selectUser(nextSelectedUserId)
+        }
         _selectedTab.value = resolvedTab
         userPrefs.edit()
             .putInt(KEY_SELECTED_TAB, resolvedTab)
             .apply()
-        if (_selectedUserId.value == null) {
+        if (nextSelectedUserId == null) {
             DynamicRepository.resetPagination(
                 scope = DynamicFeedScope.DYNAMIC_SCREEN,
                 type = resolveDynamicFeedRequestType(resolvedTab)
@@ -913,7 +926,10 @@ class DynamicViewModel(application: Application) : AndroidViewModel(application)
                     }
                 }
 
-                val selected = selectPreferredDynamicCommentAttempt(attempts = attempts)
+                val selected = selectPreferredDynamicCommentAttempt(
+                    attempts = attempts,
+                    expectedCount = fallbackCount
+                )
                 if (selected != null) {
                     _selectedCommentTarget.value = selected.target
                     _comments.value = selected.replies

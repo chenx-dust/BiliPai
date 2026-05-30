@@ -88,7 +88,7 @@ class TopTabLayoutPolicyTest {
     }
 
     @Test
-    fun `miuix top tabs render at most four complete labels`() {
+    fun `miuix top tabs render at most four complete labels without shifting tail target to front`() {
         assertEquals(
             listOf(0, 1, 2, 3),
             resolveMiuixVisibleTabIndices(totalCount = 5, selectedIndex = 0)
@@ -98,8 +98,15 @@ class TopTabLayoutPolicyTest {
             resolveMiuixVisibleTabIndices(totalCount = 5, selectedIndex = 3)
         )
         assertEquals(
-            listOf(1, 2, 3, 4),
+            listOf(0, 1, 2, 4),
             resolveMiuixVisibleTabIndices(totalCount = 5, selectedIndex = 4)
+        )
+        assertEquals(
+            3,
+            resolveMiuixSelectedVisibleIndex(
+                visibleIndices = listOf(0, 1, 2, 4),
+                selectedIndex = 4
+            )
         )
         assertEquals(
             listOf(0, 1, 2),

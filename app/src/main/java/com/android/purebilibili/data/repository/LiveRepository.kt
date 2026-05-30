@@ -13,6 +13,7 @@ import kotlinx.serialization.json.intOrNull
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import org.json.JSONObject
+import java.util.Base64
 
 data class LiveRoomH5Snapshot(
     val roomId: Long = 0,
@@ -64,6 +65,33 @@ data class LiveAreaRoomsPage(
     val totalCount: Int = 0
 )
 
+data class LiveHeartbeatSession(
+    val roomId: Long,
+    val nextIntervalSec: Int = DEFAULT_LIVE_HEARTBEAT_INTERVAL_SEC
+)
+
+data class LiveDanmakuColorOption(
+    val name: String,
+    val color: Int,
+    val colorHex: String
+)
+
+data class LiveDanmakuModeOption(
+    val name: String,
+    val mode: Int
+)
+
+data class LiveDanmakuPermission(
+    val canSend: Boolean = true,
+    val statusText: String = "可发送弹幕",
+    val maxLength: Int = DEFAULT_LIVE_DANMAKU_MAX_LENGTH,
+    val availableColors: List<LiveDanmakuColorOption> = emptyList(),
+    val availableModes: List<LiveDanmakuModeOption> = emptyList()
+)
+
+private const val DEFAULT_LIVE_HEARTBEAT_INTERVAL_SEC = 60
+private const val DEFAULT_LIVE_DANMAKU_MAX_LENGTH = 40
+
 internal fun parseLiveDanmakuHistoryItems(rawJson: String): Result<List<LivePrefetchDanmaku>> {
     val root = liveRepositoryJson.parseToJsonElement(rawJson).jsonObject
     if (root.int("code", -1) != 0) {
@@ -95,6 +123,79 @@ internal fun parseLiveDanmakuHistoryItems(rawJson: String): Result<List<LivePref
         }
     }
     return Result.success(items)
+}
+
+internal fun buildLiveHeartbeatQuery(
+    roomId: Long,
+    lastIntervalSec: Int = DEFAULT_LIVE_HEARTBEAT_INTERVAL_SEC
+): Map<String, String> {
+    val payload = "${lastIntervalSec.coerceAtLeast(1)}|${roomId.coerceAtLeast(0L)}|1|0"
+    return mapOf(
+        "hb" to Base64.getEncoder().encodeToString(payload.toByteArray(Charsets.UTF_8)),
+        "pf" to "web"
+    )
+}
+
+internal fun parseLiveHeartbeatNextInterval(rawJson: String): Int {
+    val root = runCatching {
+        liveRepositoryJson.parseToJsonElement(rawJson).jsonObject
+    }.getOrNull() ?: return DEFAULT_LIVE_HEARTBEAT_INTERVAL_SEC
+    if (root.int("code", -1) != 0) return DEFAULT_LIVE_HEARTBEAT_INTERVAL_SEC
+    return root.obj("data")
+        ?.int("next_interval")
+        ?.takeIf { it > 0 }
+        ?: DEFAULT_LIVE_HEARTBEAT_INTERVAL_SEC
+}
+
+internal fun parseLiveDanmakuPermission(rawJson: String): LiveDanmakuPermission {
+    val root = runCatching {
+        liveRepositoryJson.parseToJsonElement(rawJson).jsonObject
+    }.getOrNull() ?: return LiveDanmakuPermission(
+        canSend = false,
+        statusText = "弹幕配置解析失败",
+        maxLength = 0
+    )
+    if (root.int("code", -1) != 0) {
+        val message = root.string("message").ifBlank { root.string("msg") }.ifBlank { "弹幕配置获取失败" }
+        return LiveDanmakuPermission(canSend = false, statusText = message, maxLength = 0)
+    }
+    val data = root.obj("data")
+    val colors = data
+        ?.array("group")
+        ?.flatMap { group ->
+            (group as? JsonObject)
+                ?.array("color")
+                ?.mapNotNull { it as? JsonObject }
+                .orEmpty()
+        }
+        ?.filter { it.int("status") == 1 }
+        ?.map { color ->
+            LiveDanmakuColorOption(
+                name = color.string("name"),
+                color = color.string("color").toIntOrNull() ?: 16777215,
+                colorHex = color.string("color_hex")
+            )
+        }
+        .orEmpty()
+    val modes = data
+        ?.array("mode")
+        ?.mapNotNull { it as? JsonObject }
+        ?.filter { it.int("status") == 1 }
+        ?.map { mode ->
+            LiveDanmakuModeOption(
+                name = mode.string("name"),
+                mode = mode.int("mode")
+            )
+        }
+        .orEmpty()
+    val canSend = colors.isNotEmpty() && modes.isNotEmpty()
+    return LiveDanmakuPermission(
+        canSend = canSend,
+        statusText = if (canSend) "可发送弹幕" else "当前账号暂无可用弹幕样式",
+        maxLength = if (canSend) DEFAULT_LIVE_DANMAKU_MAX_LENGTH else 0,
+        availableColors = colors,
+        availableModes = modes
+    )
 }
 
 enum class LiveContributionRankType(
@@ -208,6 +309,27 @@ object LiveRepository {
             com.android.purebilibili.core.util.Logger.e("LiveRepo", " getLiveRooms failed", e)
             e.printStackTrace()
             Result.failure(e)
+        }
+    }
+
+    suspend fun getRecommendedLiveRooms(): Result<List<LiveRoom>> = withContext(Dispatchers.IO) {
+        try {
+            val recommendResp = api.getLiveRecommendList()
+            val recommendRooms = if (recommendResp.code == 0) {
+                recommendResp.data?.recommendRoomList
+                    ?.filterNot { it.isAd }
+                    ?.map { it.toLiveRoom() }
+                    .orEmpty()
+            } else {
+                emptyList()
+            }
+            if (recommendRooms.isNotEmpty()) {
+                Result.success(recommendRooms)
+            } else {
+                getLiveRooms(page = 1)
+            }
+        } catch (e: Exception) {
+            getLiveRooms(page = 1)
         }
     }
 
@@ -381,6 +503,33 @@ object LiveRepository {
         try {
             val realRoomId = resolveRealRoomId(roomId)
             parseLiveDanmakuHistoryItems(api.getLiveDanmakuHistory(realRoomId).string())
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
+    suspend fun getLiveDanmakuPermission(roomId: Long): Result<LiveDanmakuPermission> = withContext(Dispatchers.IO) {
+        try {
+            val realRoomId = resolveRealRoomId(roomId)
+            Result.success(parseLiveDanmakuPermission(api.getLiveDanmakuConfig(realRoomId).string()))
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
+    suspend fun reportLiveHeartbeat(
+        roomId: Long,
+        lastIntervalSec: Int = DEFAULT_LIVE_HEARTBEAT_INTERVAL_SEC
+    ): Result<Int> = withContext(Dispatchers.IO) {
+        try {
+            val realRoomId = resolveRealRoomId(roomId)
+            val raw = api.reportLiveHeartbeat(
+                buildLiveHeartbeatQuery(
+                    roomId = realRoomId,
+                    lastIntervalSec = lastIntervalSec
+                )
+            ).string()
+            Result.success(parseLiveHeartbeatNextInterval(raw))
         } catch (e: Exception) {
             Result.failure(e)
         }

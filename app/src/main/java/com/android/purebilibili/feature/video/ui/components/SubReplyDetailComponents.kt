@@ -1,7 +1,16 @@
 package com.android.purebilibili.feature.video.ui.components
 
+import android.content.Intent
 import android.widget.Toast
 import androidx.activity.compose.BackHandler
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.animateContentSize
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.expandVertically
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.shrinkVertically
+import androidx.compose.animation.slideInVertically
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.outlined.Reply
 import androidx.compose.material.icons.automirrored.outlined.Sort
@@ -49,6 +58,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
@@ -63,6 +73,8 @@ import com.android.purebilibili.core.ui.common.CopySelectionDialog
 import com.android.purebilibili.core.util.FormatUtils
 import com.android.purebilibili.core.util.rememberStoragePermissionState
 import com.android.purebilibili.data.model.response.ReplyItem
+import com.android.purebilibili.data.repository.BlockedUpRelationSource
+import com.android.purebilibili.data.repository.BlockedUpRepository
 import com.android.purebilibili.feature.dynamic.components.ImagePreviewTextContent
 import com.android.purebilibili.core.ui.animation.MaybeDissolvableVideoCard
 import com.android.purebilibili.core.ui.common.rememberClipboardCopyHandler
@@ -75,6 +87,7 @@ import io.github.alexzhirkevich.cupertino.icons.CupertinoIcons
 import io.github.alexzhirkevich.cupertino.icons.filled.HandThumbsup
 import io.github.alexzhirkevich.cupertino.icons.outlined.HandThumbsup
 import io.github.alexzhirkevich.cupertino.icons.outlined.Trash
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
 const val SUB_REPLY_DETAIL_HEADER_TAG = "subreply_detail_header"
@@ -108,6 +121,13 @@ internal data class SubReplyDetailListScrollResetKey(
     val firstConversationReplyId: Long?
 )
 
+internal data class SubReplyDetailRevealSpec(
+    val delayMillis: Int,
+    val durationMillis: Int,
+    val initialBlurRadiusDp: Float,
+    val initialOffsetDp: Int
+)
+
 internal typealias SubReplyDetailAppearance = VideoCommentAppearance
 
 internal fun resolveSubReplyDetailLayoutPolicy(
@@ -127,6 +147,21 @@ internal fun resolveSubReplyAuxiliaryBadgeVisualSpec(): SubReplyAuxiliaryBadgeVi
         imageLabelSpacingDp = 8,
         labelFontSizeSp = 12,
         labelLineHeightSp = 12
+    )
+}
+
+internal fun resolveSubReplyDetailRevealDelayMillis(levelIndex: Int): Int {
+    return (40 + levelIndex.coerceAtLeast(0) * 55).coerceAtMost(360)
+}
+
+internal fun resolveSubReplyDetailRevealSpec(
+    levelIndex: Int
+): SubReplyDetailRevealSpec {
+    return SubReplyDetailRevealSpec(
+        delayMillis = resolveSubReplyDetailRevealDelayMillis(levelIndex),
+        durationMillis = 300,
+        initialBlurRadiusDp = 0f,
+        initialOffsetDp = 14
     )
 }
 
@@ -224,6 +259,17 @@ internal fun resolveSubReplyDetailListScrollResetKey(
     )
 }
 
+internal fun resolveSubReplyTargetListIndex(
+    rootReplyId: Long,
+    visibleReplies: List<ReplyItem>,
+    targetReplyId: Long
+): Int? {
+    if (targetReplyId <= 0L) return null
+    if (targetReplyId == rootReplyId) return 0
+    val replyIndex = visibleReplies.indexOfFirst { it.rpid == targetReplyId }
+    return replyIndex.takeIf { it >= 0 }?.plus(1)
+}
+
 internal fun resolveSubReplyAuxiliaryLabel(item: ReplyItem): String? {
     val visual = resolveFanGroupVisualFromMemberAndSailing(
         member = item.member,
@@ -301,7 +347,8 @@ internal fun VideoInlineSubReplyDetailContent(
         onUrlClick = onUrlClick,
         showIdentityDecorations = showIdentityDecorations,
         onAvatarClick = onAvatarClick,
-        maxTimestampMs = maxTimestampMs
+        maxTimestampMs = maxTimestampMs,
+        targetReplyId = state.targetReplyId
     )
 }
 
@@ -335,7 +382,8 @@ internal fun SubReplyDetailContent(
     showIdentityDecorations: Boolean = true,
     onAvatarClick: ((String) -> Unit)? = null,
     maxTimestampMs: Long? = null,
-    remoteReplyCount: Int = 0
+    remoteReplyCount: Int = 0,
+    targetReplyId: Long = 0
 ) {
     val layoutPolicy = remember {
         resolveSubReplyDetailLayoutPolicy(showRootCommentEntry = false)
@@ -367,7 +415,7 @@ internal fun SubReplyDetailContent(
     val listScrollResetKey = remember(
         rootReply.rpid,
         effectiveConversationMode,
-        visibleReplies
+        visibleReplies.firstOrNull()?.rpid
     ) {
         resolveSubReplyDetailListScrollResetKey(
             rootReplyId = rootReply.rpid,
@@ -391,13 +439,24 @@ internal fun SubReplyDetailContent(
     LaunchedEffect(listScrollResetKey) {
         listState.scrollToItem(0)
     }
+    LaunchedEffect(targetReplyId, visibleReplies, isLoading, isEnd) {
+        val targetIndex = resolveSubReplyTargetListIndex(
+            rootReplyId = rootReply.rpid,
+            visibleReplies = visibleReplies,
+            targetReplyId = targetReplyId
+        )
+        when {
+            targetIndex != null -> listState.animateScrollToItem(targetIndex)
+            targetReplyId > 0L && !isLoading && !isEnd && !effectiveConversationMode -> onLoadMore()
+        }
+    }
 
     Column(
         modifier = Modifier
             .fillMaxSize()
             .background(appearance.panelColor)
     ) {
-        Row(
+        Box(
             modifier = Modifier
                 .fillMaxWidth()
                 .then(if (applyStatusBarPadding) Modifier.statusBarsPadding() else Modifier)
@@ -416,11 +475,23 @@ internal fun SubReplyDetailContent(
                 onClick = onDismiss,
                 modifier = Modifier.testTag(SUB_REPLY_DETAIL_CLOSE_TAG)
             ) {
-                Icon(
-                    imageVector = Icons.Outlined.Close,
-                    contentDescription = "Close",
-                    tint = appearance.primaryTextColor
+                Text(
+                    text = if (effectiveConversationMode) "对话详情" else "评论详情",
+                    fontWeight = FontWeight.Bold,
+                    fontSize = 17.sp,
+                    color = appearance.primaryTextColor
                 )
+                Spacer(modifier = Modifier.weight(1f))
+                IconButton(
+                    onClick = onDismiss,
+                    modifier = Modifier.testTag(SUB_REPLY_DETAIL_CLOSE_TAG)
+                ) {
+                    Icon(
+                        imageVector = Icons.Outlined.Close,
+                        contentDescription = "Close",
+                        tint = appearance.primaryTextColor
+                    )
+                }
             }
         }
 
@@ -433,98 +504,110 @@ internal fun SubReplyDetailContent(
             contentPadding = PaddingValues(bottom = layoutPolicy.listBottomPaddingDp.dp)
         ) {
             item(key = "root_reply") {
-                Box(modifier = Modifier.testTag(SUB_REPLY_DETAIL_ROOT_TAG)) {
-                    SubReplyDetailItem(
-                        item = rootReply,
-                        appearance = appearance,
-                        isRootItem = true,
-                        upMid = upMid,
-                        emoteMap = emoteMap,
-                        showUpFlag = unusedShowUpFlag,
-                        onTimestampClick = onTimestampClick,
-                        onImagePreview = onImagePreview,
-                        onReplyClick = { onReplyClick?.invoke(rootReply) },
-                        onDeleteClick = if (currentMid > 0 && rootReply.mid == currentMid) {
-                            { onDeleteComment?.invoke(rootReply.rpid) }
-                        } else null,
-                        onLikeClick = { onCommentLike?.invoke(rootReply.rpid) },
-                        isLiked = rootReply.action == 1 || rootReply.rpid in likedComments,
-                        onUrlClick = onUrlClick,
-                        maxTimestampMs = maxTimestampMs,
-                        onReportClick = onReportComment?.let { report -> { reason -> report(rootReply.rpid, reason) } },
-                        onAvatarClick = { onAvatarClick?.invoke(it) ?: Unit },
-                        showConversationAction = false,
-                        onConversationClick = null,
-                        auxiliaryLabel = null,
-                        showTrailingDivider = false
-                    )
-                }
-                HorizontalDivider(thickness = 8.dp, color = appearance.sectionDividerColor)
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(horizontal = 16.dp, vertical = 12.dp)
-                        .testTag(SUB_REPLY_DETAIL_SECTION_TAG),
-                    verticalAlignment = Alignment.CenterVertically
+                SubReplyDetailStaggeredReveal(
+                    revealKey = "root_${listScrollResetKey}",
+                    levelIndex = 0
                 ) {
-                    Text(
-                        text = if (effectiveConversationMode) {
-                            resolveSubReplyConversationSectionTitle(replyCount = visibleReplies.size)
-                        } else {
-                            resolveSubReplyDetailSectionTitle(replyCount = detailReplyDisplayCount)
-                        },
-                        fontSize = 14.sp,
-                        color = appearance.primaryTextColor,
-                        fontWeight = FontWeight.Medium
-                    )
-                    Spacer(modifier = Modifier.weight(1f))
-                    if (effectiveConversationMode) {
-                        Text(
-                            text = "返回全部回复",
-                            fontSize = 14.sp,
-                            color = appearance.sortTint,
-                            fontWeight = FontWeight.Medium,
-                            modifier = Modifier
-                                .clickable {
-                                    if (isConversationMode) {
-                                        onConversationBack?.invoke()
-                                    } else {
-                                        conversationAnchor = null
-                                    }
-                                }
-                                .padding(horizontal = 4.dp, vertical = 6.dp)
+                    Box(modifier = Modifier.testTag(SUB_REPLY_DETAIL_ROOT_TAG)) {
+                        SubReplyDetailItem(
+                            item = rootReply,
+                            appearance = appearance,
+                            isRootItem = true,
+                            upMid = upMid,
+                            emoteMap = emoteMap,
+                            showUpFlag = unusedShowUpFlag,
+                            onTimestampClick = onTimestampClick,
+                            onImagePreview = onImagePreview,
+                            onReplyClick = { onReplyClick?.invoke(rootReply) },
+                            onDeleteClick = if (currentMid > 0 && rootReply.mid == currentMid) {
+                                { onDeleteComment?.invoke(rootReply.rpid) }
+                            } else null,
+                            onLikeClick = { onCommentLike?.invoke(rootReply.rpid) },
+                            isLiked = rootReply.action == 1 || rootReply.rpid in likedComments,
+                            onUrlClick = onUrlClick,
+                            maxTimestampMs = maxTimestampMs,
+                            onReportClick = onReportComment?.let { report -> { reason -> report(rootReply.rpid, reason) } },
+                            onAvatarClick = { onAvatarClick?.invoke(it) ?: Unit },
+                            showConversationAction = false,
+                            onConversationClick = null,
+                            auxiliaryLabel = null,
+                            showTrailingDivider = false
                         )
-                    } else {
-                        Row(
-                            modifier = Modifier.testTag(SUB_REPLY_DETAIL_SORT_TAG),
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(6.dp)
-                        ) {
-                            Icon(
-                                imageVector = Icons.AutoMirrored.Outlined.Sort,
-                                contentDescription = "Sort",
-                                tint = appearance.sortTint,
-                                modifier = Modifier.size(16.dp)
-                            )
-                            Text(
-                                text = "按时间",
-                                fontSize = 14.sp,
-                                color = appearance.sortTint,
-                                fontWeight = FontWeight.Medium
-                            )
-                        }
                     }
                 }
-                HorizontalDivider(
-                    thickness = 0.5.dp,
-                    color = appearance.dividerColor
-                )
+                SubReplyDetailStaggeredReveal(
+                    revealKey = "section_${listScrollResetKey}",
+                    levelIndex = 1
+                ) {
+                    Column {
+                        HorizontalDivider(thickness = 8.dp, color = appearance.sectionDividerColor)
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(horizontal = 16.dp, vertical = 12.dp)
+                                .testTag(SUB_REPLY_DETAIL_SECTION_TAG),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            Text(
+                                text = if (effectiveConversationMode) {
+                                    resolveSubReplyConversationSectionTitle(replyCount = visibleReplies.size)
+                                } else {
+                                    resolveSubReplyDetailSectionTitle(replyCount = detailReplyDisplayCount)
+                                },
+                                fontSize = 14.sp,
+                                color = appearance.primaryTextColor,
+                                fontWeight = FontWeight.Medium
+                            )
+                            Spacer(modifier = Modifier.weight(1f))
+                            if (effectiveConversationMode) {
+                                Text(
+                                    text = "返回全部回复",
+                                    fontSize = 14.sp,
+                                    color = appearance.sortTint,
+                                    fontWeight = FontWeight.Medium,
+                                    modifier = Modifier
+                                        .clickable {
+                                            if (isConversationMode) {
+                                                onConversationBack?.invoke()
+                                            } else {
+                                                conversationAnchor = null
+                                            }
+                                        }
+                                        .padding(horizontal = 4.dp, vertical = 6.dp)
+                                )
+                            } else {
+                                Row(
+                                    modifier = Modifier.testTag(SUB_REPLY_DETAIL_SORT_TAG),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.AutoMirrored.Outlined.Sort,
+                                        contentDescription = "Sort",
+                                        tint = appearance.sortTint,
+                                        modifier = Modifier.size(16.dp)
+                                    )
+                                    Text(
+                                        text = "按时间",
+                                        fontSize = 14.sp,
+                                        color = appearance.sortTint,
+                                        fontWeight = FontWeight.Medium
+                                    )
+                                }
+                            }
+                        }
+                        HorizontalDivider(
+                            thickness = 0.5.dp,
+                            color = appearance.dividerColor
+                        )
+                    }
+                }
             }
 
             itemsIndexed(
                 items = visibleReplies,
                 key = { _, item -> item.rpid }
-            ) { index, item ->
+            ) { _, item ->
                 MaybeDissolvableVideoCard(
                     isDissolving = item.rpid in dissolvingIds,
                     onDissolveComplete = { onDeleteComment?.invoke(item.rpid) },
@@ -532,51 +615,48 @@ internal fun SubReplyDetailContent(
                     modifier = Modifier.padding(bottom = 1.dp)
                 ) {
                     SubReplyDetailItem(
-                        item = item,
-                        appearance = appearance,
-                        isRootItem = false,
-                        upMid = upMid,
-                        emoteMap = emoteMap,
-                        showUpFlag = unusedShowUpFlag,
-                        onTimestampClick = onTimestampClick,
-                        onImagePreview = onImagePreview,
-                        onReplyClick = { onReplyClick?.invoke(item) },
-                        onDeleteClick = if (currentMid > 0 && item.mid == currentMid) {
-                            { onDissolveStart?.invoke(item.rpid) }
-                        } else null,
-                        onLikeClick = { onCommentLike?.invoke(item.rpid) },
-                        isLiked = item.action == 1 || item.rpid in likedComments,
-                        onUrlClick = onUrlClick,
-                        maxTimestampMs = maxTimestampMs,
-                        onReportClick = onReportComment?.let { report -> { reason -> report(item.rpid, reason) } },
-                        onAvatarClick = { onAvatarClick?.invoke(it) ?: Unit },
-                        showConversationAction = shouldRenderSubReplyConversationAction(
                             item = item,
-                            hasConversationHandler = true
-                        ),
-                        onConversationClick = {
-                            if (onConversationClick != null) {
-                                onConversationClick(item)
+                            appearance = appearance,
+                            isRootItem = false,
+                            upMid = upMid,
+                            emoteMap = emoteMap,
+                            showUpFlag = unusedShowUpFlag,
+                            onTimestampClick = onTimestampClick,
+                            onImagePreview = onImagePreview,
+                            onReplyClick = { onReplyClick?.invoke(item) },
+                            onDeleteClick = if (currentMid > 0 && item.mid == currentMid) {
+                                { onDissolveStart?.invoke(item.rpid) }
                             } else {
-                                conversationAnchor = item
-                            }
-                        },
-                        auxiliaryLabel = if (showIdentityDecorations) {
-                            resolveSubReplyAuxiliaryLabel(item)
-                        } else {
-                            null
-                        },
-                        showTrailingDivider = true
+                                null
+                            },
+                            onLikeClick = { onCommentLike?.invoke(item.rpid) },
+                            isLiked = item.action == 1 || item.rpid in likedComments,
+                            onUrlClick = onUrlClick,
+                            maxTimestampMs = maxTimestampMs,
+                            onReportClick = onReportComment?.let { report -> { reason -> report(item.rpid, reason) } },
+                            onAvatarClick = { onAvatarClick?.invoke(it) ?: Unit },
+                            showConversationAction = shouldRenderSubReplyConversationAction(
+                                item = item,
+                                hasConversationHandler = true
+                            ),
+                            onConversationClick = {
+                                if (onConversationClick != null) {
+                                    onConversationClick(item)
+                                } else {
+                                    conversationAnchor = item
+                                }
+                            },
+                            auxiliaryLabel = if (showIdentityDecorations) {
+                                resolveSubReplyAuxiliaryLabel(item)
+                            } else {
+                                null
+                            },
+                            showTrailingDivider = true
                     )
                 }
             }
 
             item(key = "footer") {
-                LaunchedEffect(isLoading, isEnd) {
-                    if (!isLoading && !isEnd) {
-                        onLoadMore()
-                    }
-                }
                 if (isLoading) {
                     Box(
                         modifier = Modifier
@@ -672,11 +752,13 @@ private fun SubReplyDetailItem(
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     val copyToClipboard = rememberClipboardCopyHandler()
+    val blockedUpRepository = remember(context) { BlockedUpRepository(context) }
     var showActionSheet by remember(item.rpid) { mutableStateOf(false) }
     var showFreeCopyDialog by remember(item.rpid) { mutableStateOf(false) }
     var showReportDialog by remember(item.rpid) { mutableStateOf(false) }
     var pendingSaveReply by remember(item.rpid) { mutableStateOf<ReplyItem?>(null) }
     val copyText = remember(item.content.message) { item.content.message.trim() }
+    val replyMemberMid = remember(item.member.mid, item.mid) { resolveReplyMemberMid(item) }
     fun launchSaveReplyCommentImage(reply: ReplyItem) {
         scope.launch {
             val success = saveReplyCommentImageToGallery(context, reply)
@@ -702,18 +784,45 @@ private fun SubReplyDetailItem(
             storagePermission.request()
         }
     }
+    fun shareReplyComment() {
+        val sendIntent = Intent(Intent.ACTION_SEND).apply {
+            type = "text/plain"
+            putExtra(Intent.EXTRA_SUBJECT, "分享评论")
+            putExtra(Intent.EXTRA_TEXT, buildReplyCommentShareText(item))
+        }
+        context.startActivity(Intent.createChooser(sendIntent, "分享评论"))
+    }
+    fun blockReplyUser() {
+        scope.launch {
+            val result = blockedUpRepository.blockUpWithBilibiliSync(
+                mid = replyMemberMid,
+                name = item.member.uname,
+                face = item.member.avatar,
+                relationSource = BlockedUpRelationSource.COMMENT
+            )
+            Toast.makeText(context, result.message, Toast.LENGTH_SHORT).show()
+        }
+    }
 
     if (showActionSheet) {
         ReplyActionSheet(
             canDelete = onDeleteClick != null,
             canReport = onReportClick != null,
+            canShare = shouldSupportReplyShare(item),
+            canBlockUser = replyMemberMid > 0L,
             onDismiss = { showActionSheet = false },
             onCopyAll = { copyToClipboard(copyText, "评论内容") },
             onFreeCopy = { showFreeCopyDialog = true },
             onSave = {
                 requestSaveReplyCommentImage()
             },
+            onShare = {
+                shareReplyComment()
+            },
             onReply = onReplyClick,
+            onBlockUser = {
+                blockReplyUser()
+            },
             onReport = { showReportDialog = true },
             onToggleTop = {},
             onDelete = { onDeleteClick?.invoke() }
@@ -872,7 +981,12 @@ private fun SubReplyDetailItem(
                                         images,
                                         index,
                                         rect,
-                                        resolveReplyPreviewTextContent(item)
+                                        resolveReplyPreviewTextContent(
+                                            item = item,
+                                            isLiked = isLiked,
+                                            onLikeClick = onLikeClick,
+                                            onReplyClick = onReplyClick
+                                        )
                                     )
                                 },
                                 testTagPrefix = "$SUB_REPLY_DETAIL_IMAGE_TAG_PREFIX${item.rpid}_"
@@ -958,6 +1072,45 @@ private fun SubReplyDetailItem(
                 thickness = 0.5.dp,
                 color = appearance.dividerColor
             )
+        }
+    }
+}
+
+@Composable
+private fun SubReplyDetailStaggeredReveal(
+    revealKey: Any,
+    levelIndex: Int,
+    modifier: Modifier = Modifier,
+    content: @Composable () -> Unit
+) {
+    val spec = remember(levelIndex) { resolveSubReplyDetailRevealSpec(levelIndex) }
+    var visible by remember(revealKey) { mutableStateOf(false) }
+
+    LaunchedEffect(revealKey, levelIndex) {
+        visible = false
+        delay(spec.delayMillis.toLong())
+        visible = true
+    }
+
+    AnimatedVisibility(
+        visible = visible,
+        modifier = modifier,
+        enter = fadeIn(animationSpec = tween(durationMillis = spec.durationMillis)) +
+            expandVertically(
+                animationSpec = tween(durationMillis = spec.durationMillis),
+                expandFrom = Alignment.Top
+            ) +
+            slideInVertically(animationSpec = tween(durationMillis = spec.durationMillis)) { height ->
+                height / 6
+            },
+        exit = fadeOut(animationSpec = tween(durationMillis = 120)) +
+            shrinkVertically(animationSpec = tween(durationMillis = 120), shrinkTowards = Alignment.Top)
+    ) {
+        Box(
+            modifier = Modifier
+                .animateContentSize(animationSpec = tween(durationMillis = spec.durationMillis))
+        ) {
+            content()
         }
     }
 }

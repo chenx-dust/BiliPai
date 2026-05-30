@@ -3,7 +3,9 @@ package com.android.purebilibili.core.network
 
 import android.content.Context
 import com.android.purebilibili.BuildConfig
+import com.android.purebilibili.core.network.policy.HomeFeedAnonymizerRuntime
 import com.android.purebilibili.core.network.policy.resolveHardcodedDnsFallback
+import com.android.purebilibili.core.network.policy.resolveHomeFeedCookieAnonymizerDecision
 import com.android.purebilibili.core.network.policy.shouldEnableTrustAllCertificates
 import com.android.purebilibili.core.store.TokenManager
 import com.android.purebilibili.data.model.response.*
@@ -47,6 +49,19 @@ private class AppSessionCookieJar : okhttp3.CookieJar {
     }
 
     override fun loadForRequest(url: okhttp3.HttpUrl): List<okhttp3.Cookie> {
+        if (resolveHomeFeedCookieAnonymizerDecision(
+                pluginEnabled = HomeFeedAnonymizerRuntime.enabled,
+                host = url.host,
+                encodedPath = url.encodedPath
+            )
+        ) {
+            com.android.purebilibili.core.util.Logger.d(
+                "CookieJar",
+                " 初见推荐匿名化首页推荐请求: ${url.encodedPath}, clearCookieHeader=true"
+            )
+            return emptyList()
+        }
+
         val cookies = mutableListOf<okhttp3.Cookie>()
 
         synchronized(cookieLock) {
@@ -133,6 +148,16 @@ interface BilibiliApi {
     @GET("x/web-interface/nav/stat")
     suspend fun getNavStat(): NavStatResponse
 
+    @GET("x/member/web/account")
+    suspend fun getMemberAccount(): MemberAccountResponse
+
+    @retrofit2.http.FormUrlEncoded
+    @POST("x/member/web/sign/update")
+    suspend fun updateMemberSign(
+        @retrofit2.http.Field("user_sign") userSign: String,
+        @retrofit2.http.Field("csrf") csrf: String
+    ): SimpleApiResponse
+
     //  [New] 获取用户卡片信息 (轻量级用户信息)
     @GET("x/web-interface/card")
     suspend fun getUserCard(
@@ -145,6 +170,52 @@ interface BilibiliApi {
         @Query("mid") mid: Long,
         @Query("photo") photo: Boolean = true
     ): okhttp3.ResponseBody
+
+    @GET("x/note/list/archive")
+    suspend fun getPrivateVideoNoteIds(
+        @Query("oid") oid: Long,
+        @Query("oid_type") oidType: Int = 0,
+        @Query("csrf") csrf: String? = null
+    ): VideoNoteArchiveListResponse
+
+    @GET("x/note/info")
+    suspend fun getPrivateVideoNoteInfo(
+        @Query("oid") oid: Long,
+        @Query("oid_type") oidType: Int = 0,
+        @Query("note_id") noteId: String
+    ): VideoNoteInfoResponse
+
+    @GET("x/note/is_forbid")
+    suspend fun getVideoNoteForbidState(
+        @Query("aid") aid: Long
+    ): VideoNoteForbidResponse
+
+    @retrofit2.http.FormUrlEncoded
+    @POST("x/note/add")
+    suspend fun saveVideoNote(
+        @retrofit2.http.FieldMap fields: Map<String, String>
+    ): VideoNoteSaveResponse
+
+    @retrofit2.http.FormUrlEncoded
+    @POST("x/note/del")
+    suspend fun deleteVideoNote(
+        @retrofit2.http.Field("oid") oid: Long,
+        @retrofit2.http.Field("note_id") noteId: String,
+        @retrofit2.http.Field("csrf") csrf: String
+    ): SimpleApiResponse
+
+    @GET("x/note/publish/list/archive")
+    suspend fun getPublicVideoNoteList(
+        @Query("oid") oid: Long,
+        @Query("oid_type") oidType: Int = 0,
+        @Query("ps") pageSize: Int = 10,
+        @Query("pn") pageNumber: Int = 1
+    ): PublicVideoNoteListResponse
+
+    @GET("x/note/publish/info")
+    suspend fun getPublicVideoNoteInfo(
+        @Query("cvid") cvid: Long
+    ): PublicVideoNoteInfoResponse
 
     @GET("x/web-interface/history/cursor")
     suspend fun getHistoryList(
@@ -279,6 +350,12 @@ interface BilibiliApi {
         @Query("page_size") pageSize: Int = 30,
         @Query("sort_type") sortType: String = "online"  // 按人气排序
     ): LiveResponse
+
+    @GET("https://api.live.bilibili.com/xlive/web-interface/v1/webMain/getMoreRecList")
+    suspend fun getLiveRecommendList(
+        @Query("platform") platform: String = "web",
+        @Query("web_location") webLocation: String = "333.1007"
+    ): LiveRecommendResponse
     
     //  [新增] 获取关注的直播 - 需要登录
     @GET("https://api.live.bilibili.com/xlive/web-ucenter/user/following")
@@ -323,6 +400,17 @@ interface BilibiliApi {
     @GET("https://api.live.bilibili.com/xlive/web-room/v1/dM/gethistory")
     suspend fun getLiveDanmakuHistory(
         @Query("roomid") roomId: Long
+    ): ResponseBody
+
+    @GET("https://api.live.bilibili.com/xlive/web-room/v1/dM/GetDMConfigByGroup")
+    suspend fun getLiveDanmakuConfig(
+        @Query("room_id") roomId: Long,
+        @Query("web_location") webLocation: String = "444.8"
+    ): ResponseBody
+
+    @GET("https://live-trace.bilibili.com/xlive/rdata-interface/v1/heartbeat/webHeartBeat")
+    suspend fun reportLiveHeartbeat(
+        @QueryMap params: Map<String, String>
     ): ResponseBody
     
     //  [新增] 获取直播弹幕 WebSocket 信息
@@ -496,7 +584,7 @@ interface BilibiliApi {
         @Query("index") index: Int = 1  // 是否返回时间索引，1=是
     ): VideoshotResponse
 
-    @GET("https://api.bilibili.com/pbp/data")
+    @GET("https://bvc.bilivideo.com/pbp/data")
     suspend fun getPbpData(
         @Query("cid") cid: Long,
         @Query("bvid") bvid: String? = null,
@@ -1140,6 +1228,9 @@ private const val DYNAMIC_FEED_FEATURES =
     "itemOpusStyle,listOnlyfans"
 
 private const val DYNAMIC_DETAIL_FEATURES =
+    "itemOpusStyle,listOnlyfans,opusBigCover,commentsNewVersion,onlyfansVote,onlyfansAssetsV2,decorationCard,forwardListHidden,ugcDelete,htmlNewStyle"
+
+internal const val SPACE_DYNAMIC_FEATURES =
     "itemOpusStyle,listOnlyfans,opusBigCover,commentsNewVersion,onlyfansVote,onlyfansAssetsV2,decorationCard,forwardListHidden,ugcDelete"
 
 interface DynamicApi {
@@ -1150,7 +1241,10 @@ interface DynamicApi {
         @Query("offset") offset: String = "",
         @Query("update_baseline") updateBaseline: String = "",
         @Query("page") page: Int = 1,
-        @Query("features") features: String = DYNAMIC_FEED_FEATURES
+        @Query("features") features: String = DYNAMIC_FEED_FEATURES,
+        @Query("timezone_offset") timezoneOffset: Int = -480,
+        @Query("platform") platform: String = "web",
+        @Query("web_location") webLocation: String = "333.1365"
     ): DynamicFeedResponse
     
     //  [新增] 获取指定用户的动态列表
@@ -1170,6 +1264,13 @@ interface DynamicApi {
     //  [降级] 旧版详情接口，某些动态类型在 desktop 接口会返回不支持
     @GET("x/polymer/web-dynamic/v1/detail")
     suspend fun getDynamicDetailFallback(
+        @Query("id") id: String,
+        @Query("features") features: String = DYNAMIC_DETAIL_FEATURES
+    ): DynamicDetailResponse
+
+    // 长图文/专栏 opus 详情接口，htmlNewStyle 用于兼容旧专栏正文结构。
+    @GET("x/polymer/web-dynamic/v1/opus/detail")
+    suspend fun getOpusDetail(
         @Query("id") id: String,
         @Query("features") features: String = DYNAMIC_DETAIL_FEATURES
     ): DynamicDetailResponse
@@ -1308,7 +1409,8 @@ interface SpaceApi {
     suspend fun getSpaceDynamic(
         @Query("host_mid") hostMid: Long,
         @Query("offset") offset: String = "",
-        @Query("timezone_offset") timezoneOffset: Int = -480
+        @Query("timezone_offset") timezoneOffset: Int = -480,
+        @Query("features") features: String = SPACE_DYNAMIC_FEATURES
     ): com.android.purebilibili.data.model.response.SpaceDynamicResponse
     
     //  [New] Get User Audio List
@@ -1321,8 +1423,8 @@ interface SpaceApi {
         @Query("jsonp") jsonp: String = "jsonp"
     ): com.android.purebilibili.data.model.response.SpaceAudioResponse
 
-    //  [New] Get User Article List
-    @GET("x/space/wbi/article")
+    // 空间图文列表。API 文档为 /opus/feed/space，返回 opus_id/content/cover/jump_url。
+    @GET("x/polymer/web-dynamic/v1/opus/feed/space")
     suspend fun getSpaceArticleList(
         @QueryMap params: Map<String, String>
     ): com.android.purebilibili.data.model.response.SpaceArticleResponse

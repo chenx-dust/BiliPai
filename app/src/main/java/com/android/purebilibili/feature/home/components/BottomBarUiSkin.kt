@@ -48,14 +48,43 @@ data class BottomBarSkinIconPaths(
     val selected: String? = null
 )
 
+data class TopTabSkinIconPaths(
+    val unselected: String,
+    val selected: String? = null
+) {
+    fun pathFor(selected: Boolean): String {
+        return if (selected) {
+            this.selected ?: unselected
+        } else {
+            unselected
+        }
+    }
+}
+
 data class HomeUiSkinDecoration(
     val skinId: String,
     val topAtmosphereTint: Color,
     val searchCapsuleTint: Color,
-    val topAtmosphereImagePath: String? = null
-)
+    val topAtmosphereImagePath: String? = null,
+    val topTabBackgroundImagePath: String? = null,
+    val sideBackgroundImagePath: String? = null,
+    val profileBackgroundImagePath: String? = null,
+    val profileSquaredBackgroundImagePath: String? = null,
+    val topTabSkinIconPaths: Map<String, TopTabSkinIconPaths> = emptyMap(),
+    val topTabPartitionSkinIconPaths: TopTabSkinIconPaths? = null
+) {
+    fun topTabIconPathFor(categoryKey: String, selected: Boolean = false): String? {
+        val normalizedKey = categoryKey.trim().uppercase()
+        val paths = topTabSkinIconPaths[normalizedKey] ?: return null
+        return paths.pathFor(selected)
+    }
 
-internal fun resolveBottomBarSkinDockIconSize(): Dp = 36.dp
+    fun topTabPartitionIconPath(selected: Boolean = false): String? {
+        return topTabPartitionSkinIconPaths?.pathFor(selected)
+    }
+}
+
+internal fun resolveBottomBarSkinDockIconSize(): Dp = 40.dp
 
 internal fun resolveBottomBarSkinDockHeight(): Dp = 88.dp
 
@@ -76,9 +105,9 @@ internal fun resolveBottomBarSkinDockLabelFontSize(): TextUnit = 12.sp
 
 internal fun resolveBottomBarSkinDockLabelLineHeight(): TextUnit = 18.sp
 
-internal fun resolveBottomBarMiuixSkinDockIconSize(): Dp = 34.dp
+internal fun resolveBottomBarMiuixSkinDockIconSize(): Dp = 38.dp
 
-internal fun resolveBottomBarCompactSkinHomeIconSize(): Dp = 36.dp
+internal fun resolveBottomBarCompactSkinHomeIconSize(): Dp = 40.dp
 
 internal fun resolveMiuixDockedBottomBarItemHeight(hasUiSkinDecoration: Boolean): Dp {
     return if (hasUiSkinDecoration) {
@@ -132,10 +161,18 @@ fun resolveHomeUiSkinDecoration(uiSkinState: UiSkinState): HomeUiSkinDecoration?
         val hasTopDecoration = UiSkinSurface.HOME_TOP_CHROME in manifest.surfaces &&
             (
                 manifest.assets.topAtmosphere != null ||
+                    manifest.assets.homeTopTabBackground != null ||
+                    manifest.assets.homeSideBackground != null ||
+                    manifest.assets.homeProfileBackground != null ||
+                    manifest.assets.homeProfileSquaredBackground != null ||
+                    manifest.assets.homeChannelIcon != null ||
+                    manifest.assets.bottomBarIcons.isNotEmpty() ||
                     manifest.colors.topAtmosphereTint != null ||
                     manifest.colors.searchCapsuleTint != null
                 )
         if (!hasTopDecoration) return null
+        val topTabIconPaths = resolveTopTabSkinIconPaths(activeSkin)
+        val partitionIconPaths = resolveTopTabPartitionSkinIconPaths(activeSkin, topTabIconPaths)
         HomeUiSkinDecoration(
             skinId = manifest.skinId,
             topAtmosphereTint = parseUiSkinColor(
@@ -146,7 +183,15 @@ fun resolveHomeUiSkinDecoration(uiSkinState: UiSkinState): HomeUiSkinDecoration?
                 value = manifest.colors.searchCapsuleTint,
                 fallback = Color.White
             ),
-            topAtmosphereImagePath = activeSkin.assetFilePath(manifest.assets.topAtmosphere)
+            topAtmosphereImagePath = activeSkin.assetFilePath(manifest.assets.topAtmosphere),
+            topTabBackgroundImagePath = activeSkin.assetFilePath(manifest.assets.homeTopTabBackground),
+            sideBackgroundImagePath = activeSkin.assetFilePath(manifest.assets.homeSideBackground),
+            profileBackgroundImagePath = activeSkin.assetFilePath(manifest.assets.homeProfileBackground),
+            profileSquaredBackgroundImagePath = activeSkin.assetFilePath(
+                manifest.assets.homeProfileSquaredBackground
+            ),
+            topTabSkinIconPaths = topTabIconPaths,
+            topTabPartitionSkinIconPaths = partitionIconPaths
         )
     }
 }
@@ -258,5 +303,84 @@ private fun resolveBottomBarSkinIconPaths(
                 )
             }
         }
+        val settingsIcon = resolveBottomBarSettingsSkinIconPaths(activeSkin, manifestIcons)
+        if (settingsIcon != null) {
+            put(BottomNavItem.SETTINGS, settingsIcon)
+        }
     }
+}
+
+private fun resolveBottomBarSettingsSkinIconPaths(
+    activeSkin: com.android.purebilibili.core.plugin.skin.InstalledUiSkinPackage,
+    manifestIcons: Map<String, String>
+): BottomBarSkinIconPaths? {
+    val unselectedAsset = activeSkin.manifest.assets.homeChannelIcon
+        ?: manifestIcons["profile"]
+        ?: manifestIcons["member"]
+        ?: manifestIcons["home"]
+    val selectedAsset = activeSkin.manifest.assets.homeChannelSelectedIcon
+        ?: manifestIcons["profile_selected"]
+        ?: manifestIcons["member_selected"]
+        ?: manifestIcons["home_selected"]
+    val unselectedPath = activeSkin.assetFilePath(unselectedAsset) ?: return null
+    return BottomBarSkinIconPaths(
+        unselected = unselectedPath,
+        selected = activeSkin.assetFilePath(selectedAsset)
+    )
+}
+
+private fun resolveTopTabSkinIconPaths(
+    activeSkin: com.android.purebilibili.core.plugin.skin.InstalledUiSkinPackage
+): Map<String, TopTabSkinIconPaths> {
+    val manifestIcons = activeSkin.manifest.assets.bottomBarIcons
+    val homeIcon = resolveTopTabSkinIconPaths(activeSkin, manifestIcons["home"], manifestIcons["home_selected"])
+    val followingIcon = resolveTopTabSkinIconPaths(
+        activeSkin,
+        manifestIcons["following"],
+        manifestIcons["following_selected"]
+    )
+    val memberIcon = resolveTopTabSkinIconPaths(activeSkin, manifestIcons["member"], manifestIcons["member_selected"])
+    val profileIcon = resolveTopTabSkinIconPaths(activeSkin, manifestIcons["profile"], manifestIcons["profile_selected"])
+    val channelIcon = resolveTopTabSkinIconPaths(
+        activeSkin,
+        activeSkin.manifest.assets.homeChannelIcon,
+        activeSkin.manifest.assets.homeChannelSelectedIcon
+    )
+    val styleFallbackIcon = channelIcon ?: memberIcon ?: profileIcon ?: homeIcon ?: followingIcon
+
+    return buildMap {
+        homeIcon?.let { put("RECOMMEND", it) }
+        followingIcon?.let { put("FOLLOW", it) }
+        styleFallbackIcon?.let {
+            put("POPULAR", channelIcon ?: it)
+            put("LIVE", memberIcon ?: it)
+            put("ANIME", profileIcon ?: it)
+            put("GAME", memberIcon ?: it)
+            put("KNOWLEDGE", followingIcon ?: it)
+            put("TECH", channelIcon ?: it)
+        }
+    }
+}
+
+private fun resolveTopTabPartitionSkinIconPaths(
+    activeSkin: com.android.purebilibili.core.plugin.skin.InstalledUiSkinPackage,
+    topTabIconPaths: Map<String, TopTabSkinIconPaths>
+): TopTabSkinIconPaths? {
+    return resolveTopTabSkinIconPaths(
+        activeSkin,
+        activeSkin.manifest.assets.homeChannelIcon,
+        activeSkin.manifest.assets.homeChannelSelectedIcon
+    ) ?: topTabIconPaths["POPULAR"] ?: topTabIconPaths["RECOMMEND"]
+}
+
+private fun resolveTopTabSkinIconPaths(
+    activeSkin: com.android.purebilibili.core.plugin.skin.InstalledUiSkinPackage,
+    unselectedAssetPath: String?,
+    selectedAssetPath: String?
+): TopTabSkinIconPaths? {
+    val unselectedPath = activeSkin.assetFilePath(unselectedAssetPath) ?: return null
+    return TopTabSkinIconPaths(
+        unselected = unselectedPath,
+        selected = activeSkin.assetFilePath(selectedAssetPath)
+    )
 }

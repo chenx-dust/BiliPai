@@ -211,6 +211,97 @@ class TopTabStylePolicyTest {
     }
 
     @Test
+    fun `miuix top panel reserves extra content gap below category tabs`() {
+        val ios = resolveHomeTopPresetStyle(
+            uiPreset = UiPreset.IOS,
+            androidNativeVariant = AndroidNativeVariant.MATERIAL3,
+            labelMode = 2
+        )
+        val material3 = resolveHomeTopPresetStyle(
+            uiPreset = UiPreset.MD3,
+            androidNativeVariant = AndroidNativeVariant.MATERIAL3,
+            labelMode = 2
+        )
+        val miuix = resolveHomeTopPresetStyle(
+            uiPreset = UiPreset.MD3,
+            androidNativeVariant = AndroidNativeVariant.MIUIX,
+            labelMode = 2
+        )
+
+        assertEquals(5.dp, ios.reservedContentBottomGap)
+        assertEquals(5.dp, material3.reservedContentBottomGap)
+        assertEquals(12.dp, miuix.reservedContentBottomGap)
+        assertEquals(
+            12.dp,
+            resolveHomeTopReservedContentBottomGap(
+                uiPreset = UiPreset.MD3,
+                androidNativeVariant = AndroidNativeVariant.MIUIX
+            )
+        )
+    }
+
+    @Test
+    fun `miuix top settings button follows action button metrics while other presets keep existing size`() {
+        assertEquals(
+            40.dp,
+            resolveHomeTopSettingsButtonSize(
+                uiPreset = UiPreset.IOS,
+                androidNativeVariant = AndroidNativeVariant.MATERIAL3
+            )
+        )
+        assertEquals(
+            40.dp,
+            resolveHomeTopSettingsButtonSize(
+                uiPreset = UiPreset.MD3,
+                androidNativeVariant = AndroidNativeVariant.MATERIAL3
+            )
+        )
+        assertEquals(
+            44.dp,
+            resolveHomeTopSettingsButtonSize(
+                uiPreset = UiPreset.MD3,
+                androidNativeVariant = AndroidNativeVariant.MIUIX
+            )
+        )
+        assertEquals(
+            20.dp,
+            resolveHomeTopSettingsIconSize(
+                uiPreset = UiPreset.IOS,
+                androidNativeVariant = AndroidNativeVariant.MATERIAL3
+            )
+        )
+        assertEquals(
+            20.dp,
+            resolveHomeTopSettingsIconSize(
+                uiPreset = UiPreset.MD3,
+                androidNativeVariant = AndroidNativeVariant.MATERIAL3
+            )
+        )
+        assertEquals(
+            22.dp,
+            resolveHomeTopSettingsIconSize(
+                uiPreset = UiPreset.MD3,
+                androidNativeVariant = AndroidNativeVariant.MIUIX
+            )
+        )
+    }
+
+    @Test
+    fun `miuix category action trailing padding aligns with unified top settings center`() {
+        val miuix = resolveHomeTopPresetStyle(
+            uiPreset = UiPreset.MD3,
+            androidNativeVariant = AndroidNativeVariant.MIUIX,
+            labelMode = 2
+        )
+
+        assertEquals(4.dp, resolveMiuixTopTabRowHorizontalPadding())
+        assertEquals(
+            5.dp,
+            resolveMiuixTopTabActionTrailingPadding(miuix.unifiedPanelInnerPadding)
+        )
+    }
+
+    @Test
     fun `clicking selected top tab scrolls to top while other tabs select`() {
         assertEquals(
             TopTabClickAction.SCROLL_TO_TOP,
@@ -279,6 +370,22 @@ class TopTabStylePolicyTest {
 
         assertTrue(itemBlock.contains("HomeTopTabRenderer.IOS -> resolveSharedBottomBarCapsuleShape()"))
         assertFalse(itemBlock.contains("HomeTopTabRenderer.IOS -> AppShapes.container(ContainerLevel.Pill)"))
+    }
+
+    @Test
+    fun `ios lightweight top tab capsule uses gray white while content keeps theme primary`() {
+        val colorScheme = lightColorScheme(primary = Color(0xFF2D6A4F))
+        val capsuleColor = resolveIosTopTabCapsuleContainerColor(
+            isDarkTheme = false,
+            selectionFraction = 1f
+        )
+
+        assertEquals(Color(0xFFF2F2F7), capsuleColor)
+        assertEquals(
+            colorScheme.primary,
+            resolveIosTopTabSelectedContentColor(colorScheme)
+        )
+        assertFalse(capsuleColor == colorScheme.primary.copy(alpha = 0.10f))
     }
 
     @Test
@@ -399,6 +506,28 @@ class TopTabStylePolicyTest {
         assertFalse(
             "MiuiX 分区按钮普通态不应使用 primary 大面积铺色",
             miuixTabRowSource.contains("color = MiuixTheme.colorScheme.primary.copy")
+        )
+    }
+
+    @Test
+    fun `android native miuix top tabs keep native contour indicator driver`() {
+        val source = sourceText("src/main/java/com/android/purebilibili/feature/home/components/TopBar.kt")
+        val miuixSelectionSource = source
+            .substringAfter("private fun MiuixCategoryTabRow(")
+            .substringBefore("val topTabSpec =")
+
+        assertTrue(
+            "MiuiX 分类条必须继续使用原生轮廓 TabRow",
+            source.substringAfter("private fun MiuixCategoryTabRow(")
+                .contains("MiuixTabRowWithContour(")
+        )
+        assertFalse(
+            "MiuiX 原生轮廓指示器不应复用 MD3 的 pager 指示器位置驱动",
+            miuixSelectionSource.contains("resolveTopTabIndicatorRenderPosition(")
+        )
+        assertTrue(
+            "MiuiX 可见槽位应由已选中分类驱动，避免滑动中退化成 MD3 指示器语义",
+            miuixSelectionSource.contains("selectedIndex = selectedIndex")
         )
     }
 
@@ -591,6 +720,29 @@ class TopTabStylePolicyTest {
         assertEquals(44.dp, resolveHomeSkinTopTabActionButtonSize())
         assertEquals(24.dp, resolveHomeSkinTopTabActionIconSize())
         assertEquals(4.dp, resolveHomeSkinTopTabIndicatorBottomPadding())
+        assertEquals(32.dp, resolveTopTabSkinStickerIconSize(showText = true))
+        assertEquals(36.dp, resolveTopTabSkinStickerIconSize(showText = false))
+        assertEquals(32.dp, resolveTopTabSkinPartitionIconSize())
+        assertEquals(28.dp, resolveTopTabSkinStickerIndicatorWidth())
+        assertEquals(
+            64.dp,
+            resolveTopTabSkinStickerRowHeight(
+                baseRowHeight = 56.dp,
+                hasSkinStickerIcons = true,
+                showIcon = true,
+                showText = true
+            )
+        )
+        assertEquals(
+            52.dp,
+            resolveTopTabSkinStickerRowHeight(
+                baseRowHeight = 52.dp,
+                hasSkinStickerIcons = false,
+                showIcon = true,
+                showText = true
+            )
+        )
+        assertEquals(2.dp, resolveTopTabSkinStickerItemVerticalPadding(showText = true))
     }
 
     @Test
@@ -644,9 +796,9 @@ class TopTabStylePolicyTest {
     }
 
     @Test
-    fun `skin decoration forces plain top tabs`() {
+    fun `skin decoration keeps host top tab readability strategy`() {
         assertFalse(shouldUseHomeSkinPlainTopTabs(null))
-        assertTrue(
+        assertFalse(
             shouldUseHomeSkinPlainTopTabs(
                 HomeUiSkinDecoration(
                     skinId = "test",
@@ -655,6 +807,46 @@ class TopTabStylePolicyTest {
                 )
             )
         )
+    }
+
+    @Test
+    fun `skin top tabs render sticker image before host vector icon fallback`() {
+        val source = sourceText("src/main/java/com/android/purebilibili/feature/home/components/TopBar.kt")
+        val rowCallSource = source
+            .substringAfter("LightweightHomeTopTabs(")
+            .substringBefore("private fun MiuixCategoryTabRow(")
+        val itemSource = source
+            .substringAfter("private fun LightweightTopTabItem(")
+            .substringBefore("@OptIn(ExperimentalMaterial3Api::class)")
+
+        assertTrue(rowCallSource.contains("topTabSkinIconPaths = topTabSkinIconPaths"))
+        assertTrue(rowCallSource.contains("partitionSkinIconPath = partitionSkinIconPath"))
+        assertTrue(itemSource.contains("skinIconPath"))
+        assertTrue(itemSource.contains("AsyncImage("))
+        assertTrue(itemSource.contains("model = File(skinIconPath)"))
+        assertTrue(itemSource.contains("resolveTopTabSkinStickerIconSize(showText = showText)"))
+        assertTrue(rowCallSource.contains("resolveTopTabSkinPartitionIconSize()"))
+        assertTrue(rowCallSource.contains("resolveTopTabSkinStickerRowHeight("))
+        assertTrue(rowCallSource.contains("if (effectiveRenderer == HomeTopTabRenderer.MD3 && !hasSkinStickerIcons)"))
+        assertTrue(itemSource.contains("resolveTopTabSkinStickerItemVerticalPadding(showText = showText)"))
+        assertTrue(itemSource.contains("resolveTopTabSkinStickerIndicatorWidth()"))
+        assertTrue(itemSource.contains("alpha(selectionFraction)"))
+        assertTrue(itemSource.indexOf("AsyncImage(") < itemSource.indexOf("imageVector = icon"))
+        assertTrue(itemSource.contains("else {"))
+        assertTrue(itemSource.contains("resolveTopTabCategoryIcon(categoryKey, uiPreset)"))
+    }
+
+    @Test
+    fun `skin top tab stickers keep ios md3 and miuix on shared item indicator path`() {
+        val source = sourceText("src/main/java/com/android/purebilibili/feature/home/components/TopBar.kt")
+        val categoryTabRowSource = source
+            .substringAfter("fun CategoryTabRow(")
+            .substringBefore("@Composable\nprivate fun MiuixCategoryTabRow(")
+
+        assertTrue(categoryTabRowSource.contains("val hasSkinStickerIcons = topTabSkinIconPaths.isNotEmpty() || !partitionSkinIconPath.isNullOrBlank()"))
+        assertTrue(categoryTabRowSource.contains("if (!hasSkinStickerIcons && !skinPlainStyle && presetStyle.renderer == HomeTopTabRenderer.MIUIX)"))
+        assertTrue(categoryTabRowSource.contains("topTabSkinIconPaths = topTabSkinIconPaths"))
+        assertTrue(categoryTabRowSource.contains("partitionSkinIconPath = partitionSkinIconPath"))
     }
 
     @Test

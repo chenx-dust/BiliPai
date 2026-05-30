@@ -15,7 +15,7 @@
 </p>
 
 <p>
-  <img src="https://img.shields.io/badge/Version-8.3.2-007AFF?style=flat-square&labelColor=ffffff" alt="Version 8.3.2" />
+  <img src="https://img.shields.io/badge/Version-8.7.0-007AFF?style=flat-square&labelColor=ffffff" alt="Version 8.7.0" />
   <img src="https://img.shields.io/badge/Android-8.0%2B-34C759?style=flat-square&logo=android&logoColor=white" alt="Android 8.0+" />
   <img src="https://img.shields.io/badge/Kotlin-100%25-7F52FF?style=flat-square&logo=kotlin&logoColor=white" alt="Kotlin" />
   <img src="https://img.shields.io/badge/License-GPL--3.0-FF3B30?style=flat-square" alt="GPL-3.0" />
@@ -37,7 +37,7 @@
   </a>
 </p>
 
-<sub>README 更新：2026-05-17 · 当前构建版本以 app/build.gradle.kts 为准 · 发布记录以 <a href="CHANGELOG.md">CHANGELOG.md</a> 为准</sub>
+<sub>README 更新：2026-05-28 · 当前构建版本以 app/build.gradle.kts 为准 · 发布记录以 <a href="CHANGELOG.md">CHANGELOG.md</a> 为准</sub>
 
 </div>
 
@@ -88,6 +88,7 @@ BiliPai 是一个用 Kotlin 与 Jetpack Compose 构建的 Android 客户端，�
 | 模块 | 能力 |
 | --- | --- |
 | 视频播放 | DASH 自适应码率、4K / 1080P60 / HDR、弹幕、手势、倍速、后台播放、画中画、播放记忆 |
+| 视频笔记 | 私有笔记、新建/编辑/删除、AI 总结生成草稿、富文本编辑、时间点、Markdown 中间格式、系统分享 |
 | 听视频 | 沉浸式 / 黑胶唱片模式、歌词、播放列表、定时关闭、系统媒体中心联动 |
 | 番剧影视 | 选集面板、季度/版本切换、横屏顶部操作、追番与播放进度 |
 | 直播 | 分区浏览、HLS 播放、实时弹幕、动态卡片跳转直播间 |
@@ -111,13 +112,15 @@ BiliPai 的界面围绕“内容优先、控制轻量、动效克制”调整。
 
 | 形态 | 当前状态 | 文档 |
 | --- | --- | --- |
-| 内置插件 | 随主应用稳定分发，覆盖空降助手、去广告、弹幕增强、夜间护眼、今日推荐单、CDN 属地优选 | 应用内插件中心 |
+| 内置插件 | 随主应用稳定分发，覆盖空降助手、去广告、弹幕增强、夜间护眼、今日推荐单、CDN 属地优选、初见推荐 | 应用内插件中心 |
 | JSON / `.bp` 规则插件 | 支持 URL 导入，适合推荐流过滤、弹幕过滤与高亮 | [JSON 插件开发](docs/PLUGIN_DEVELOPMENT.md) |
 | 外部 `.bpplugin` 包 | SDK、包格式、manifest、签名校验已就绪；外部 Dex 执行仍处于预览阶段 | [Plugin SDK](plugins/sdk/README.md) |
 | 源码级原生插件 | 适合复杂播放器、推荐、弹幕能力，需要重新编译 APK | [原生插件开发](docs/NATIVE_PLUGIN_DEVELOPMENT.md) |
 
 > [!CAUTION]
 > 导入第三方插件前请审阅规则和能力声明，尤其是 `NETWORK`、`LOCAL_HISTORY_READ`、`LOCAL_FEEDBACK_READ`、`PLAYER_CONTROL` 等敏感能力。
+
+> 初见推荐致谢原作者 wangdaodao 的 [TabulaBili](https://github.com/wangdaodaodao/TabulaBili) 与 tjsky 的 [TabulaBili-Plus](https://github.com/tjsky/TabulaBili)，BiliPai 仅实现 Android 端内置插件形态。
 
 ## 技术栈
 
@@ -179,13 +182,17 @@ cd BiliPai
 
 ## 最近更新
 
-当前仓库版本号已更新到 `8.3.2 / versionCode 196`。公开发布说明请以 [CHANGELOG.md](CHANGELOG.md) 为准；最新完整记录为 `v8.3.2`：
+当前仓库版本号已更新到 `8.7.0 / versionCode 211`。公开发布说明请以 [CHANGELOG.md](CHANGELOG.md) 为准；最新完整记录为 `v8.7.0`：
 
-- 插件 SDK、数据型皮肤包、装扮存档导入和示例皮肤资源补齐闭环，并修复首页顶部、底栏、图标、文字裁切和深色可读性问题。
-- 动态专栏封面、动态富文本链接、视频深链误判和内部链接解析完成修复。
-- 关注列表分页补全并加入更平滑的加载过渡，减少只加载前半段的问题。
-- 横屏音量/亮度数字加入逐位上下渐隐、模糊、非线性恢复和克制触感反馈；竖屏视频返回详情页增加更自然的顶部锚点过渡。
-- 评论区显示、空间页头像预览和视频详情 BGM 发现 Sheet 完成合入与测试修复。
+- 新增 iOS26 底栏液态玻璃预设，提供更厚边缘折射、轻色散和亮面滚动反馈。
+- 修复 iOS26 预设滑动停止时底栏整体闪烁，上下滑动时底栏会连续轻微提亮。
+- 修复首页竖屏视频入口，竖屏视频从首页进入详情时可提前进入竖屏全屏状态。
+- 将“我的”Tab 重写为空间首页式布局，个人资料、收藏和追番内容承载更统一。
+- 修复空间首页视频封面不可见、收藏夹封面字段缺失和服务入口展示不完整。
+- 完善空间首页动态、收藏和追番模块，追番卡片可跳转番剧详情。
+- 修复系统通知页面闪退、通知链接解析和动态时间显示问题。
+- 修复动态顶部遮挡用户信息，动态卡片和转发内容显示更稳定。
+- 修复低版本 Android 上 Haze 视觉效果闪退，并补齐可恢复视觉效果兜底。
 
 ## 路线图
 

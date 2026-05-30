@@ -222,18 +222,6 @@ class UiSkinPackageReaderTest {
     }
 
     @Test
-    fun builtInWinterSkinDeclaresOnlyDecorativeHomeChromeSurfaces() {
-        val skin = BuiltInUiSkins.winterCloud
-
-        assertEquals("builtin.winter_cloud", skin.skinId)
-        assertEquals(
-            setOf(UiSkinSurface.HOME_BOTTOM_BAR, UiSkinSurface.HOME_TOP_CHROME),
-            skin.surfaces
-        )
-        assertTrue(skin.assets.bottomBarTrim != null)
-    }
-
-    @Test
     fun bilibiliSkinThemeArchive_convertsToPreviewableBpskin() {
         val bytes = bilibiliThemeArchive(
             "萧逸/萧逸.json" to convertedThemeJson().toByteArray(),
@@ -371,6 +359,29 @@ class UiSkinPackageReaderTest {
     }
 
     @Test
+    fun bilibiliSkinDirectNestedJson_downloadsPackageUrlAndConverts() {
+        val packageBytes = skinPackage(
+            "tail_bg.png" to pngBytes(),
+            "head_tab_bg.jpg" to jpegBytes()
+        )
+
+        val importPackage = UiSkinImportPackageResolver.resolve(
+            inputBytes = nestedOfficialSkinJson().toByteArray(),
+            remotePackageFetcher = { url ->
+                assertEquals("https://i0.hdslb.com/bfs/garb/nested_theme_package.zip", url)
+                packageBytes
+            }
+        ).getOrThrow()
+        val preview = UiSkinPackageReader.preview(importPackage.packageBytes).getOrThrow()
+
+        assertEquals(UiSkinImportSource.BILIBILI_SKIN_ARCHIVE, importPackage.source)
+        assertEquals("local.bilibili_skin.998877", preview.manifest.skinId)
+        assertEquals("嵌套官方主题", preview.manifest.displayName)
+        assertEquals("assets/tail_bg.png", preview.manifest.assets.bottomBarTrim)
+        assertEquals("assets/head_tab_bg.jpg", preview.manifest.assets.topAtmosphere)
+    }
+
+    @Test
     fun bilibiliSkinDirectJsonWithoutFetcherReturnsReadablePackageUrlError() {
         val error = UiSkinImportPackageResolver.resolve(
             inputBytes = officialUserEquipJson().toByteArray()
@@ -406,9 +417,15 @@ class UiSkinPackageReaderTest {
         val bytes = skinPackage(
             "tail_bg.png" to pngBytes(),
             "head_bg.jpg" to jpegBytes(),
+            "head_tab_bg.jpg" to jpegBytes(),
+            "side_bg.jpg" to jpegBytes(),
+            "head_myself_bg.jpg" to jpegBytes(),
+            "head_myself_squared_bg.jpg" to jpegBytes(),
             "tail_icon_main.png" to pngBytes(),
             "tail_icon_selected_main.png" to pngBytes(),
-            "tail_icon_dynamic.png" to pngBytes()
+            "tail_icon_dynamic.png" to pngBytes(),
+            "tail_icon_channel.png" to pngBytes(),
+            "tail_icon_selected_channel.png" to pngBytes()
         )
 
         val importPackage = UiSkinImportPackageResolver.resolve(bytes).getOrThrow()
@@ -419,8 +436,16 @@ class UiSkinPackageReaderTest {
         assertEquals("本地装扮资源包", preview.manifest.displayName)
         assertEquals("assets/tail_bg.png", preview.manifest.assets.bottomBarTrim)
         assertEquals("assets/head_bg.jpg", preview.manifest.assets.topAtmosphere)
+        assertEquals("assets/head_tab_bg.jpg", preview.manifest.assets.homeTopTabBackground)
+        assertEquals("assets/side_bg.jpg", preview.manifest.assets.homeSideBackground)
+        assertEquals("assets/head_myself_bg.jpg", preview.manifest.assets.homeProfileBackground)
+        assertEquals("assets/head_myself_squared_bg.jpg", preview.manifest.assets.homeProfileSquaredBackground)
         assertEquals("assets/tail_icon_main.png", preview.manifest.assets.bottomBarIcons["home"])
         assertEquals("assets/tail_icon_selected_main.png", preview.manifest.assets.bottomBarIcons["home_selected"])
+        assertEquals("assets/tail_icon_channel.png", preview.manifest.assets.homeChannelIcon)
+        assertEquals("assets/tail_icon_selected_channel.png", preview.manifest.assets.homeChannelSelectedIcon)
+        assertEquals(null, preview.manifest.assets.bottomBarIcons["story"])
+        assertEquals(null, preview.manifest.assets.bottomBarIcons["story_selected"])
         assertEquals(false, preview.manifest.communityShareable)
         assertEquals(true, preview.manifest.containsOfficialAssets)
     }
@@ -593,6 +618,29 @@ class UiSkinPackageReaderTest {
                     "color": "#112233",
                     "color_second_page": "#445566",
                     "tail_color": "#223344"
+                  }
+                }
+              }
+            }
+        """.trimIndent()
+    }
+
+    private fun nestedOfficialSkinJson(): String {
+        return """
+            {
+              "code": 0,
+              "data": {
+                "skin_suit": {
+                  "item": {
+                    "item_id": 998877,
+                    "name": "嵌套官方主题",
+                    "properties": {
+                      "ver": "1774972801",
+                      "package_url": "https://i0.hdslb.com/bfs/garb/nested_theme_package.zip",
+                      "color": "#334455",
+                      "color_second_page": "#556677",
+                      "tail_color": "#778899"
+                    }
                   }
                 }
               }

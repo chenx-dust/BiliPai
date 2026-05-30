@@ -69,6 +69,36 @@ class SpacePlaybackPolicyTest {
     }
 
     @Test
+    fun resolveSpaceVideoProgressState_showsLocalPlaybackProgress() {
+        val state = resolveSpaceVideoProgressState(
+            video = item(bvid = "BV1", title = "first", length = "02:00"),
+            localPositionMs = 30_000L
+        )
+
+        assertTrue(state.showProgressBar)
+        assertEquals(30, state.progressSec)
+        assertEquals(0.25f, state.progressFraction)
+    }
+
+    @Test
+    fun resolveSpaceVideoProgressState_marksNearEndLocalProgressCompleted() {
+        val state = resolveSpaceVideoProgressState(
+            video = item(bvid = "BV1", title = "first", length = "02:00"),
+            localPositionMs = 118_000L
+        )
+
+        assertTrue(state.showProgressBar)
+        assertEquals(-1, state.progressSec)
+        assertEquals(1f, state.progressFraction)
+    }
+
+    @Test
+    fun resolveSpaceResumePositionMs_usesPositiveLocalProgressOnly() {
+        assertEquals(42_000L, resolveSpaceResumePositionMs(localPositionMs = 42_000L))
+        assertEquals(0L, resolveSpaceResumePositionMs(localPositionMs = -1L))
+    }
+
+    @Test
     fun resolveSpacePriorityTabLoadState_keeps_tabs_independent() {
         val shell = buildInitialTabShellState(selectedTab = SpaceMainTab.CONTRIBUTION)
             .withUpdatedTab(SpaceMainTab.CONTRIBUTION) { it.copy(isLoading = true, hasLoaded = true) }

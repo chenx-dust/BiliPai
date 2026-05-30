@@ -8,9 +8,11 @@ import com.android.purebilibili.feature.video.usecase.*
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import androidx.media3.common.C
 import androidx.media3.common.PlaybackException
 import androidx.media3.common.PlaybackParameters
 import androidx.media3.common.Player
+import androidx.media3.common.Tracks
 import androidx.media3.exoplayer.ExoPlayer
 import com.android.purebilibili.core.cache.PlayUrlCache
 import com.android.purebilibili.core.cooldown.PlaybackCooldownManager
@@ -27,6 +29,8 @@ import com.android.purebilibili.core.util.NetworkUtils
 import com.android.purebilibili.data.model.VideoLoadError
 import com.android.purebilibili.data.model.response.*
 import com.android.purebilibili.data.repository.VideoRepository
+import com.android.purebilibili.data.repository.VideoNoteRepository
+import com.android.purebilibili.data.repository.VideoNoteSavePayload
 import com.android.purebilibili.data.repository.ViewGrpcRepository
 import com.android.purebilibili.data.repository.resolveVideoPlaybackAuthState
 import com.android.purebilibili.feature.plugin.PlaybackCdnPlugin
@@ -36,6 +40,17 @@ import com.android.purebilibili.feature.plugin.SponsorBlockVideoSnapshot
 import com.android.purebilibili.feature.plugin.buildSponsorBlockSkipRecord
 import com.android.purebilibili.feature.video.controller.QualityManager
 import com.android.purebilibili.feature.video.controller.QualityPermissionResult
+import com.android.purebilibili.feature.video.note.VideoNoteBlock
+import com.android.purebilibili.feature.video.note.VideoNoteContentCodec
+import com.android.purebilibili.feature.video.note.VideoNoteEditorDocument
+import com.android.purebilibili.feature.video.note.VideoNoteLoadStatus
+import com.android.purebilibili.feature.video.note.VideoNotePublicPreview
+import com.android.purebilibili.feature.video.note.VideoNoteUiState
+import com.android.purebilibili.feature.video.note.buildVideoNoteDraftFromAiSummary
+import com.android.purebilibili.feature.video.note.resolveVideoNoteConflictMessage
+import com.android.purebilibili.feature.video.note.resolveVideoNoteEditableDocument
+import com.android.purebilibili.feature.video.note.resolveVideoNoteSaveFeedback
+import com.android.purebilibili.feature.video.note.shouldLoadVideoNote
 import com.android.purebilibili.feature.video.playback.policy.shouldRefreshPremiumAudioForPlaybackSpeedChange
 import com.android.purebilibili.feature.video.usecase.*
 import kotlinx.coroutines.Dispatchers
@@ -162,6 +177,49 @@ internal fun buildSponsorBlockVideoSnapshot(currentState: PlayerUiState): Sponso
     )
 }
 
+internal data class AudioModeCollectionPlaylist(
+    val items: List<PlaylistItem>,
+    val startIndex: Int
+)
+
+internal fun buildAudioModeCollectionPlaylist(
+    episodes: List<UgcEpisode>,
+    currentBvid: String,
+    currentCid: Long
+): AudioModeCollectionPlaylist? {
+    val playableEpisodes = episodes.filter { it.bvid.isNotBlank() }
+    val items = playableEpisodes
+        .map { episode ->
+            PlaylistItem(
+                bvid = episode.bvid,
+                title = episode.title.ifBlank {
+                    episode.arc?.title?.takeIf { title -> title.isNotBlank() } ?: episode.bvid
+                },
+                cover = episode.arc?.pic.orEmpty(),
+                owner = "",
+                duration = episode.arc?.duration?.toLong() ?: 0L
+            )
+        }
+    if (items.isEmpty()) return null
+
+    val exactIndex = playableEpisodes.indexOfFirst { episode ->
+        episode.bvid == currentBvid &&
+            currentCid > 0L &&
+            episode.cid == currentCid
+    }
+    val fallbackIndex = playableEpisodes.indexOfFirst { it.bvid == currentBvid }
+    val startIndex = when {
+        exactIndex >= 0 -> exactIndex
+        fallbackIndex >= 0 -> fallbackIndex
+        else -> 0
+    }.coerceIn(0, items.lastIndex)
+
+    return AudioModeCollectionPlaylist(
+        items = items,
+        startIndex = startIndex
+    )
+}
+
 internal data class PlaybackCdnFallbackState(
     val selectedVideoUrl: String = "",
     val selectedAudioUrl: String? = null,
@@ -187,15 +245,44 @@ internal fun buildPlaybackCdnFallbackState(
     selectedAudioUrl: String?,
     originalVideoUrl: String,
     originalAudioUrl: String?,
-    regionLabel: String?
+    regionLabel: String?,
+    audioFallbackUrl: String? = null
 ): PlaybackCdnFallbackState {
+    val fallbackAudioUrl = when {
+        selectedAudioUrl != originalAudioUrl -> originalAudioUrl
+        !audioFallbackUrl.isNullOrBlank() -> audioFallbackUrl
+        else -> originalAudioUrl
+    }
     return PlaybackCdnFallbackState(
         selectedVideoUrl = selectedVideoUrl,
         selectedAudioUrl = selectedAudioUrl,
         fallbackVideoUrl = originalVideoUrl.takeIf { it.isNotBlank() },
-        fallbackAudioUrl = originalAudioUrl,
+        fallbackAudioUrl = fallbackAudioUrl,
         regionLabel = regionLabel
     )
+}
+
+internal fun buildPlaybackAudioUrlCandidates(
+    audioUrl: String?,
+    cachedDashAudios: List<DashAudio>
+): List<String> {
+    val selectedAudio = audioUrl
+        ?.takeIf { it.isNotBlank() }
+        ?.let { selectedUrl ->
+            cachedDashAudios.firstOrNull { audio ->
+                audio.getValidUrl() == selectedUrl ||
+                    audio.backupUrl.orEmpty().any { backupUrl -> backupUrl == selectedUrl }
+            }
+        }
+
+    return buildList {
+        audioUrl?.takeIf { it.isNotBlank() }?.let(::add)
+        selectedAudio
+            ?.backupUrl
+            .orEmpty()
+            .filter { it.isNotBlank() }
+            .let(::addAll)
+    }.distinct()
 }
 
 internal fun shouldFallbackFromCdnRewrite(
@@ -203,6 +290,19 @@ internal fun shouldFallbackFromCdnRewrite(
     playbackReady: Boolean
 ): Boolean {
     return state.usesCdnRewrite && !playbackReady
+}
+
+internal fun shouldFallbackFromCdnRewrite(
+    state: PlaybackCdnFallbackState,
+    playbackReady: Boolean,
+    expectedAudioTrack: Boolean,
+    hasSelectedAudioTrack: Boolean,
+    audioRendererError: Boolean
+): Boolean {
+    if (!state.usesCdnRewrite) return false
+    if (!playbackReady) return true
+    if (audioRendererError) return true
+    return expectedAudioTrack && !hasSelectedAudioTrack
 }
 
 internal fun hostForPlaybackLog(url: String?): String {
@@ -262,6 +362,7 @@ sealed class PlayerUiState {
         // [新增] AI Summary & BGM
         val aiSummary: AiSummaryData? = null,
         val aiSummaryPrompt: AiSummaryPromptState? = null,
+        val videoNoteState: VideoNoteUiState = VideoNoteUiState(),
         val bgmInfo: BgmInfo? = null,
         val bgmInfoList: List<BgmInfo> = emptyList(),
         // [New] AI Audio Translation
@@ -373,6 +474,22 @@ internal fun resolveRequestedStartPositionMs(
     val safeCachedPositionMs = cachedPositionMs.coerceAtLeast(0L)
     if (safeCachedPositionMs > 0L) return safeCachedPositionMs
     return fallbackResumePositionMs.coerceAtLeast(0L)
+}
+
+internal fun resolvePageSwitchStartPositionMs(
+    cachedPositionMs: Long,
+    pageDurationSeconds: Long,
+    ignoreSavedProgress: Boolean,
+    endedRestartThresholdMs: Long = 5_000L
+): Long {
+    if (ignoreSavedProgress) return 0L
+    val safeCachedPositionMs = cachedPositionMs.coerceAtLeast(0L)
+    val durationMs = pageDurationSeconds.coerceAtLeast(0L) * 1000L
+    val restartBoundaryMs = (durationMs - endedRestartThresholdMs.coerceAtLeast(0L)).coerceAtLeast(0L)
+    if (durationMs > 0L && safeCachedPositionMs >= restartBoundaryMs) {
+        return 0L
+    }
+    return safeCachedPositionMs
 }
 
 internal fun resolveInitialPlaybackQualityMode(): PlaybackQualityMode = PlaybackQualityMode.AUTO
@@ -1223,6 +1340,7 @@ class PlayerViewModel : ViewModel() {
     private var activeLoadJob: Job? = null
     private var playerInfoJob: Job? = null
     private var aiSummaryJob: Job? = null
+    private var videoNoteJob: Job? = null
     
     //  Public Player Accessor
     val currentPlayer: Player?
@@ -1663,7 +1781,7 @@ class PlayerViewModel : ViewModel() {
     private val playbackEndListener = object : Player.Listener {
         override fun onPlaybackStateChanged(playbackState: Int) {
             if (playbackState == Player.STATE_READY) {
-                markPlaybackCdnReady()
+                markPlaybackCdnReadyIfMediaReady()
             }
             if (playbackState == Player.STATE_ENDED) {
                 // �️ [修复] 仅当用户主动开始播放后才触发自动连播
@@ -1683,6 +1801,14 @@ class PlayerViewModel : ViewModel() {
 
                 if (isPortraitPlaybackSessionActive) {
                     Logger.d("PlayerVM", "📱 STATE_ENDED in portrait session, handled by portrait pager")
+                    return
+                }
+
+                if (_isInAudioMode.value) {
+                    val didContinue = handleAudioModePlaybackEnded(ignoreSavedProgress = true)
+                    if (!didContinue) {
+                        _showPlaybackEndedDialog.value = false
+                    }
                     return
                 }
 
@@ -1731,6 +1857,10 @@ class PlayerViewModel : ViewModel() {
                 // 🛡️ [修复] 用户开始播放时设置标志
                 hasUserStartedPlayback = true
             }
+        }
+
+        override fun onTracksChanged(tracks: Tracks) {
+            markPlaybackCdnReadyIfMediaReady()
         }
 
         override fun onPlayerError(error: PlaybackException) {
@@ -2046,25 +2176,11 @@ class PlayerViewModel : ViewModel() {
     }
 
     private fun hasNextPageOrRecommended(): Boolean {
-        val nextStrategy = resolveAudioNextPlaybackStrategy(
-            isExternalPlaylist = PlaylistManager.isExternalPlaylist.value,
-            externalPlaylistSource = PlaylistManager.externalPlaylistSource.value
-        )
-        if (nextStrategy == AudioNextPlaybackStrategy.PLAY_EXTERNAL_PLAYLIST) {
-            return hasNextInPlaylist(loopAtEnd = false)
-        }
         val (hasNextPage, hasNextSeasonEpisode, hasNextPlaylistItem) = resolveCurrentNextAvailability()
         return hasNextPage || hasNextSeasonEpisode || hasNextPlaylistItem
     }
 
     private fun hasPreviousPageOrRecommended(): Boolean {
-        val previousStrategy = resolveAudioNextPlaybackStrategy(
-            isExternalPlaylist = PlaylistManager.isExternalPlaylist.value,
-            externalPlaylistSource = PlaylistManager.externalPlaylistSource.value
-        )
-        if (previousStrategy == AudioNextPlaybackStrategy.PLAY_EXTERNAL_PLAYLIST) {
-            return hasPreviousInPlaylist()
-        }
         val (hasPreviousPage, hasPreviousSeasonEpisode, hasPreviousPlaylistItem) =
             resolveCurrentPreviousAvailability()
         return hasPreviousPage || hasPreviousSeasonEpisode || hasPreviousPlaylistItem
@@ -2139,6 +2255,52 @@ class PlayerViewModel : ViewModel() {
 
     fun playPreviousRecommended(ignoreSavedProgress: Boolean = false): Boolean {
         return playPreviousPageOrRecommended(ignoreSavedProgress = ignoreSavedProgress)
+    }
+
+    fun playNextAudioModeTrack(ignoreSavedProgress: Boolean = false): Boolean {
+        return playAudioModePlaylistItem(
+            item = PlaylistManager.playNext(),
+            emptyMessage = "播放列表结束",
+            ignoreSavedProgress = ignoreSavedProgress
+        )
+    }
+
+    fun playPreviousAudioModeTrack(ignoreSavedProgress: Boolean = false): Boolean {
+        return playAudioModePlaylistItem(
+            item = PlaylistManager.playPrevious(),
+            emptyMessage = "没有上一个视频",
+            ignoreSavedProgress = ignoreSavedProgress
+        )
+    }
+
+    private fun handleAudioModePlaybackEnded(ignoreSavedProgress: Boolean): Boolean {
+        if (PlaylistManager.playMode.value == PlayMode.REPEAT_ONE) {
+            exoPlayer?.seekTo(0)
+            exoPlayer?.playWhenReady = true
+            exoPlayer?.play()
+            return exoPlayer != null
+        }
+        return playNextAudioModeTrack(ignoreSavedProgress = ignoreSavedProgress)
+    }
+
+    private fun playAudioModePlaylistItem(
+        item: PlaylistItem?,
+        emptyMessage: String,
+        ignoreSavedProgress: Boolean
+    ): Boolean {
+        if (item == null) {
+            toast(emptyMessage)
+            return false
+        }
+        viewModelScope.launch {
+            toast("正在播放: ${item.title}")
+        }
+        loadVideo(
+            bvid = item.bvid,
+            autoPlay = true,
+            ignoreSavedProgress = ignoreSavedProgress
+        )
+        return true
     }
 
     private fun playPreviousFromRecommendedQueue(ignoreSavedProgress: Boolean = false): Boolean {
@@ -2223,6 +2385,7 @@ class PlayerViewModel : ViewModel() {
         playbackCoordinator.dismissResumeSuggestion()
         bootstrapContextIfNeeded()
         aiSummaryJob?.cancel()
+        videoNoteJob?.cancel()
         Logger.d(
             "PlayerVM",
             "SUB_DBG loadVideo start: request=${playbackRequest.bvid}/${playbackRequest.cid}, aid=${playbackRequest.aid}, force=${playbackRequest.force}, current=$currentBvid/$currentCid, ui=${(_uiState.value as? PlayerUiState.Success)?.info?.bvid}/${(_uiState.value as? PlayerUiState.Success)?.info?.cid}"
@@ -2585,6 +2748,15 @@ class PlayerViewModel : ViewModel() {
                             isLoggedIn = result.isLoggedIn,
                             requestToken = requestToken
                         )
+                        val videoNoteEnabled = appContext?.let {
+                            com.android.purebilibili.core.store.SettingsManager.getVideoNoteEnabledSync(it)
+                        } ?: true
+                        if (shouldLoadVideoNote(videoNoteEnabled, result.info.aid)) {
+                            loadVideoNote(
+                                loadedBvid = result.info.bvid,
+                                loadedAid = result.info.aid
+                            )
+                        }
 
                         //  [新增] 更新播放列表
                         updatePlaylist(result.info, result.related)
@@ -2700,6 +2872,27 @@ class PlayerViewModel : ViewModel() {
      *  [新增] 更新播放列表
      */
     private fun updatePlaylist(currentInfo: com.android.purebilibili.data.model.response.ViewInfo, related: List<com.android.purebilibili.data.model.response.RelatedVideo>) {
+        if (_isInAudioMode.value) {
+            val collectionPlaylist = currentInfo.ugc_season?.let { season ->
+                buildAudioModeCollectionPlaylist(
+                    episodes = season.sections.flatMap { it.episodes },
+                    currentBvid = currentInfo.bvid,
+                    currentCid = currentInfo.cid
+                )
+            }
+            if (collectionPlaylist != null) {
+                PlaylistManager.setPlaylist(
+                    items = collectionPlaylist.items,
+                    startIndex = collectionPlaylist.startIndex
+                )
+                Logger.d(
+                    "PlayerVM",
+                    "🎵 听视频合集队列: ${collectionPlaylist.items.size} 项, 当前=${collectionPlaylist.startIndex}"
+                )
+                return
+            }
+        }
+
         val currentPlaylist = PlaylistManager.playlist.value
         val externalDecision = resolveExternalPlaylistSyncDecision(
             isExternalPlaylist = PlaylistManager.isExternalPlaylist.value,
@@ -4811,6 +5004,7 @@ class PlayerViewModel : ViewModel() {
         aiSummaryJob?.cancel()
         aiSummaryJob = viewModelScope.launch {
             var queuedRetryCount = 0
+            var requestRetryCount = 0
             val loadingPrompt = initialAiSummaryPromptState()
             _uiState.update { current ->
                 if (
@@ -4909,6 +5103,19 @@ class PlayerViewModel : ViewModel() {
                     }.onFailure { throwable ->
                         val diagnosis =
                             com.android.purebilibili.data.repository.diagnoseAiSummaryFailure(throwable)
+                        if (shouldRetryAiSummaryRequestFailure(diagnosis.status, requestRetryCount)) {
+                            requestRetryCount += 1
+                            nextDelayMs = resolveAiSummaryRetryDelayMs(
+                                queuedRetryCount = requestRetryCount,
+                                isInBackground = BackgroundManager.isInBackground
+                            )
+                            shouldPollAgain = true
+                            Logger.i(
+                                "PlayerVM",
+                                "🤖 AI Summary retryable failure, retry scheduled: bvid=$bvid cid=$cid retryInMs=$nextDelayMs retryCount=$requestRetryCount"
+                            )
+                            return@onFailure
+                        }
                         val prompt = resolveAiSummaryPromptState(diagnosis)
                         _uiState.update { current ->
                             if (current is PlayerUiState.Success && current.info.bvid == bvid) {
@@ -4940,6 +5147,270 @@ class PlayerViewModel : ViewModel() {
                     return@launch
                 }
             }
+        }
+    }
+
+    private fun loadVideoNote(
+        loadedBvid: String,
+        loadedAid: Long
+    ) {
+        val videoNoteEnabled = appContext?.let {
+            com.android.purebilibili.core.store.SettingsManager.getVideoNoteEnabledSync(it)
+        } ?: true
+        if (!shouldLoadVideoNote(videoNoteEnabled, loadedAid)) return
+        videoNoteJob?.cancel()
+        videoNoteJob = viewModelScope.launch {
+            _uiState.update { state ->
+                val success = state as? PlayerUiState.Success ?: return@update state
+                if (success.info.bvid != loadedBvid) return@update state
+                success.copy(
+                    videoNoteState = success.videoNoteState.copy(
+                        status = VideoNoteLoadStatus.LOADING,
+                        errorMessage = null,
+                        feedbackMessage = null
+                    )
+                )
+            }
+
+            VideoNoteRepository.getVideoNoteSnapshot(loadedAid)
+                .onSuccess { snapshot ->
+                    _uiState.update { state ->
+                        val success = state as? PlayerUiState.Success ?: return@update state
+                        if (success.info.bvid != loadedBvid || success.info.aid != loadedAid) return@update state
+                        val privateNote = snapshot.privateNote
+                        val privateDocument = privateNote?.let {
+                            VideoNoteContentCodec.decode(
+                                title = it.title.ifBlank { success.info.title },
+                                content = it.content
+                            )
+                        }
+                        success.copy(
+                            videoNoteState = VideoNoteUiState(
+                                status = VideoNoteLoadStatus.READY,
+                                forbidNoteEntrance = snapshot.forbidNoteEntrance,
+                                privateNoteId = snapshot.privateNoteId,
+                                privateNoteTitle = privateNote?.title.orEmpty(),
+                                privateNoteSummary = privateNote?.summary.orEmpty(),
+                                privateNoteDocument = privateDocument,
+                                publicNoteCount = snapshot.publicNoteTotal,
+                                publicNotes = snapshot.publicNotes.map { note ->
+                                    VideoNotePublicPreview(
+                                        cvid = note.cvid,
+                                        title = note.title,
+                                        summary = note.summary,
+                                        authorName = note.author?.name.orEmpty(),
+                                        webUrl = note.webUrl,
+                                        likes = note.likes
+                                    )
+                                }
+                            )
+                        )
+                    }
+                }
+                .onFailure { throwable ->
+                    _uiState.update { state ->
+                        val success = state as? PlayerUiState.Success ?: return@update state
+                        if (success.info.bvid != loadedBvid || success.info.aid != loadedAid) return@update state
+                        success.copy(
+                            videoNoteState = success.videoNoteState.copy(
+                                status = VideoNoteLoadStatus.ERROR,
+                                errorMessage = throwable.message ?: "笔记加载失败"
+                            )
+                        )
+                    }
+                }
+        }
+    }
+
+    fun retryVideoNote() {
+        val current = _uiState.value as? PlayerUiState.Success ?: return
+        val videoNoteEnabled = appContext?.let {
+            com.android.purebilibili.core.store.SettingsManager.getVideoNoteEnabledSync(it)
+        } ?: true
+        if (!shouldLoadVideoNote(videoNoteEnabled, current.info.aid)) return
+        loadVideoNote(loadedBvid = current.info.bvid, loadedAid = current.info.aid)
+    }
+
+    fun openVideoNoteEditor() {
+        val current = _uiState.value as? PlayerUiState.Success ?: return
+        if (current.videoNoteState.forbidNoteEntrance) return
+        val noteState = current.videoNoteState
+        val document = resolveVideoNoteEditableDocument(
+            noteState = noteState,
+            defaultTitle = current.info.title
+        )
+        _uiState.update { state ->
+            val success = state as? PlayerUiState.Success ?: return@update state
+            success.copy(
+                videoNoteState = success.videoNoteState.copy(
+                    editorVisible = true,
+                    editorDocument = document,
+                    editorFromAiSummary = noteState.editorFromAiSummary && noteState.privateNoteDocument != document,
+                    errorMessage = null,
+                    feedbackMessage = null
+                )
+            )
+        }
+    }
+
+    fun closeVideoNoteEditor() {
+        _uiState.update { state ->
+            val success = state as? PlayerUiState.Success ?: return@update state
+            success.copy(videoNoteState = success.videoNoteState.copy(editorVisible = false))
+        }
+    }
+
+    fun updateVideoNoteEditorDocument(document: VideoNoteEditorDocument) {
+        _uiState.update { state ->
+            val success = state as? PlayerUiState.Success ?: return@update state
+            success.copy(videoNoteState = success.videoNoteState.copy(editorDocument = document))
+        }
+    }
+
+    fun insertCurrentPlaybackTimestampIntoNote() {
+        val current = _uiState.value as? PlayerUiState.Success ?: return
+        val positionSeconds = ((exoPlayer?.currentPosition ?: 0L) / 1000L).coerceAtLeast(0L)
+        val pageIndex = current.info.pages.indexOfFirst { it.cid == current.info.cid }.coerceAtLeast(0)
+        val timestamp = VideoNoteBlock.Timestamp(
+            seconds = positionSeconds,
+            cid = current.info.cid,
+            index = pageIndex,
+            cidCount = current.info.pages.size.coerceAtLeast(1)
+        )
+        val document = current.videoNoteState.editorDocument
+        updateVideoNoteEditorDocument(
+            document.copy(blocks = document.blocks + timestamp + VideoNoteBlock.Text(" "))
+        )
+    }
+
+    fun createVideoNoteDraftFromAiSummary() {
+        val current = _uiState.value as? PlayerUiState.Success ?: return
+        val aiSummary = current.aiSummary ?: return
+        val pageIndex = current.info.pages.indexOfFirst { it.cid == current.info.cid }.coerceAtLeast(0)
+        val draft = buildVideoNoteDraftFromAiSummary(
+            title = current.videoNoteState.privateNoteDocument?.title ?: current.info.title,
+            aiSummary = aiSummary,
+            cid = current.info.cid,
+            pageIndex = pageIndex,
+            cidCount = current.info.pages.size.coerceAtLeast(1),
+            existingDocument = current.videoNoteState.privateNoteDocument
+        )
+        _uiState.update { state ->
+            val success = state as? PlayerUiState.Success ?: return@update state
+            success.copy(
+                videoNoteState = success.videoNoteState.copy(
+                    editorVisible = true,
+                    editorDocument = draft,
+                    editorFromAiSummary = true,
+                    feedbackMessage = resolveVideoNoteConflictMessage(
+                        hasExistingPrivateNote = success.videoNoteState.privateNoteDocument != null
+                    ),
+                    errorMessage = null
+                )
+            )
+        }
+    }
+
+    fun saveVideoNote(updatedDocument: VideoNoteEditorDocument? = null) {
+        val current = _uiState.value as? PlayerUiState.Success ?: return
+        val noteState = current.videoNoteState
+        if (noteState.saving || noteState.forbidNoteEntrance) return
+        val sourceDocument = updatedDocument ?: noteState.editorDocument
+        val document = sourceDocument.copy(
+            title = sourceDocument.title.ifBlank { current.info.title }
+        )
+        val encoded = VideoNoteContentCodec.encode(document)
+        if (encoded.contentLength <= 0) {
+            _uiState.update { state ->
+                val success = state as? PlayerUiState.Success ?: return@update state
+                success.copy(videoNoteState = success.videoNoteState.copy(errorMessage = "先写一点内容再保存。"))
+            }
+            return
+        }
+        _uiState.update { state ->
+            val success = state as? PlayerUiState.Success ?: return@update state
+            success.copy(videoNoteState = success.videoNoteState.copy(saving = true, errorMessage = null))
+        }
+        viewModelScope.launch {
+            VideoNoteRepository.savePrivateNote(
+                VideoNoteSavePayload(
+                    aid = current.info.aid,
+                    noteId = noteState.privateNoteId,
+                    title = document.title,
+                    summary = encoded.summary,
+                    content = encoded.content,
+                    tags = encoded.tags,
+                    contentLength = encoded.contentLength
+                )
+            ).onSuccess { noteId ->
+                _uiState.update { state ->
+                    val success = state as? PlayerUiState.Success ?: return@update state
+                    if (success.info.bvid != current.info.bvid) return@update state
+                    success.copy(
+                        videoNoteState = success.videoNoteState.copy(
+                            status = VideoNoteLoadStatus.READY,
+                            privateNoteId = noteId,
+                            privateNoteTitle = document.title,
+                            privateNoteSummary = encoded.summary,
+                            privateNoteDocument = document,
+                            editorVisible = false,
+                            saving = false,
+                            feedbackMessage = resolveVideoNoteSaveFeedback(noteState.editorFromAiSummary),
+                            errorMessage = null
+                        )
+                    )
+                }
+            }.onFailure { throwable ->
+                _uiState.update { state ->
+                    val success = state as? PlayerUiState.Success ?: return@update state
+                    success.copy(
+                        videoNoteState = success.videoNoteState.copy(
+                            saving = false,
+                            errorMessage = throwable.message ?: "笔记保存失败"
+                        )
+                    )
+                }
+            }
+        }
+    }
+
+    fun deleteVideoNote() {
+        val current = _uiState.value as? PlayerUiState.Success ?: return
+        val noteId = current.videoNoteState.privateNoteId ?: return
+        if (current.videoNoteState.deleting) return
+        _uiState.update { state ->
+            val success = state as? PlayerUiState.Success ?: return@update state
+            success.copy(videoNoteState = success.videoNoteState.copy(deleting = true, errorMessage = null))
+        }
+        viewModelScope.launch {
+            VideoNoteRepository.deletePrivateNote(aid = current.info.aid, noteId = noteId)
+                .onSuccess {
+                    _uiState.update { state ->
+                        val success = state as? PlayerUiState.Success ?: return@update state
+                        if (success.info.bvid != current.info.bvid) return@update state
+                        success.copy(
+                            videoNoteState = success.videoNoteState.copy(
+                                privateNoteId = null,
+                                privateNoteTitle = "",
+                                privateNoteSummary = "",
+                                privateNoteDocument = null,
+                                deleting = false,
+                                feedbackMessage = "笔记已删除。"
+                            )
+                        )
+                    }
+                }
+                .onFailure { throwable ->
+                    _uiState.update { state ->
+                        val success = state as? PlayerUiState.Success ?: return@update state
+                        success.copy(
+                            videoNoteState = success.videoNoteState.copy(
+                                deleting = false,
+                                errorMessage = throwable.message ?: "笔记删除失败"
+                            )
+                        )
+                    }
+                }
         }
     }
     
@@ -4975,24 +5446,46 @@ class PlayerViewModel : ViewModel() {
     
     fun doTripleAction() {
         val current = _uiState.value as? PlayerUiState.Success ?: return
+        doTripleActionForVideo(
+            aid = current.info.aid,
+            bvid = current.info.bvid,
+            currentLiked = current.isLiked,
+            currentCoinCount = current.coinCount,
+            currentFavorited = current.isFavorited
+        )
+    }
+
+    fun doTripleActionForVideo(
+        aid: Long,
+        bvid: String,
+        currentLiked: Boolean,
+        currentCoinCount: Int,
+        currentFavorited: Boolean,
+        onResult: ((TripleActionResult) -> Unit)? = null
+    ) {
+        if (aid <= 0L || bvid.isBlank()) return
         viewModelScope.launch {
             toast("正在三连")
-            interactionUseCase.doTripleAction(current.info.aid)
+            interactionUseCase.doTripleAction(aid)
                 .onSuccess { result ->
                     val visualState = resolveTripleActionVisualState(
-                        currentLiked = current.isLiked,
-                        currentCoinCount = current.coinCount,
-                        currentFavorited = current.isFavorited,
+                        currentLiked = currentLiked,
+                        currentCoinCount = currentCoinCount,
+                        currentFavorited = currentFavorited,
                         likeSuccess = result.likeSuccess,
                         coinSuccess = result.coinSuccess,
                         coinFailureMessage = result.coinMessage,
                         favoriteSuccess = result.favoriteSuccess
                     )
-                    _uiState.value = current.copy(
-                        isLiked = visualState.isLiked,
-                        coinCount = visualState.coinCount,
-                        isFavorited = visualState.isFavorited
-                    )
+                    val current = _uiState.value as? PlayerUiState.Success
+                    if (current != null && current.info.aid == aid && current.info.bvid == bvid) {
+                        _uiState.value = current.copy(
+                            isLiked = visualState.isLiked,
+                            coinCount = visualState.coinCount,
+                            isFavorited = visualState.isFavorited
+                        )
+                    }
+                    onResult?.invoke(result)
                     if (result.allSuccess) _tripleCelebrationVisible.value = true
                     toast(
                         resolveTripleActionFeedbackMessage(
@@ -5007,7 +5500,7 @@ class PlayerViewModel : ViewModel() {
                     viewModelScope.launch {
                         val context = appContext ?: return@launch
                         val isJumpEnabled = com.android.purebilibili.core.store.SettingsManager.getTripleJumpEnabled(context).first()
-                        if (result.allSuccess && isJumpEnabled) {
+                        if (result.allSuccess && isJumpEnabled && current?.info?.bvid == bvid) {
                              // Wait a bit for the celebration to show
                             delay(2000)
                             loadVideo("BV1JsK5eyEuB", autoPlay = true)
@@ -5549,11 +6042,11 @@ class PlayerViewModel : ViewModel() {
                         isHevcSupported = isHevcSupported,
                         isAv1Supported = isAv1Supported
                     )
-                    val restoredPosition = if (ignoreSavedProgress) {
-                        0L
-                    } else {
-                        playbackUseCase.getCachedPosition(currentBvid, page.cid)
-                    }
+                    val restoredPosition = resolvePageSwitchStartPositionMs(
+                        cachedPositionMs = playbackUseCase.getCachedPosition(currentBvid, page.cid),
+                        pageDurationSeconds = page.duration,
+                        ignoreSavedProgress = ignoreSavedProgress
+                    )
                     
                     if (selection != null) {
                         val cdnSelection = resolvePlaybackCdnCandidateSelection(
@@ -6188,14 +6681,10 @@ class PlayerViewModel : ViewModel() {
                 ?.let { addAll(it) }
         }.distinct()
 
-        val rawAudioUrls = buildList {
-            audioUrl?.let { add(it) }
-            cachedDashAudios.firstOrNull()
-                ?.backupUrl
-                ?.filterNotNull()
-                ?.filter { it.isNotEmpty() }
-                ?.let { addAll(it) }
-        }.distinct()
+        val rawAudioUrls = buildPlaybackAudioUrlCandidates(
+            audioUrl = audioUrl,
+            cachedDashAudios = cachedDashAudios
+        )
 
         val cdnRewrite = PluginManager
             .getEnabledPlugins(PlaybackCdnPlugin::class)
@@ -6225,7 +6714,8 @@ class PlayerViewModel : ViewModel() {
                 selectedAudioUrl = selectedAudioUrl,
                 originalVideoUrl = videoUrl,
                 originalAudioUrl = audioUrl,
-                regionLabel = cdnRewrite?.regionLabel
+                regionLabel = cdnRewrite?.regionLabel,
+                audioFallbackUrl = rawAudioUrls.drop(1).firstOrNull()
             )
         )
     }
@@ -6263,13 +6753,36 @@ class PlayerViewModel : ViewModel() {
         playbackCdnFallbackJob = viewModelScope.launch {
             delay(PLAYBACK_CDN_FIRST_FRAME_FALLBACK_TIMEOUT_MS)
             val playbackReady = exoPlayer?.playbackState == Player.STATE_READY
-            if (shouldFallbackFromCdnRewrite(playbackCdnFallbackState, playbackReady)) {
-                fallbackFromCdnRewrite(reason = "first_frame_timeout")
+            val expectedAudioTrack = playbackCdnFallbackState.selectedAudioUrl != null
+            val hasSelectedAudioTrack = hasSelectedAudioTrack(exoPlayer)
+            if (shouldFallbackFromCdnRewrite(
+                    state = playbackCdnFallbackState,
+                    playbackReady = playbackReady,
+                    expectedAudioTrack = expectedAudioTrack,
+                    hasSelectedAudioTrack = hasSelectedAudioTrack,
+                    audioRendererError = false
+                )
+            ) {
+                val reason = if (playbackReady && expectedAudioTrack && !hasSelectedAudioTrack) {
+                    "audio_track_timeout"
+                } else {
+                    "first_frame_timeout"
+                }
+                fallbackFromCdnRewrite(reason = reason)
             }
         }
     }
 
-    private fun markPlaybackCdnReady() {
+    private fun markPlaybackCdnReadyIfMediaReady() {
+        val state = playbackCdnFallbackState
+        if (state.usesCdnRewrite && state.selectedAudioUrl != null && !hasSelectedAudioTrack(exoPlayer)) {
+            Logger.d(
+                "PlayerVM",
+                "CDN fallback remains armed: region=${state.regionLabel ?: "unknown"}, " +
+                    "audio=${hostForPlaybackLog(state.selectedAudioUrl)}, fallbackAudio=${hostForPlaybackLog(state.fallbackAudioUrl)}"
+            )
+            return
+        }
         playbackCdnFallbackJob?.cancel()
         playbackCdnFallbackJob = null
     }
@@ -6293,7 +6806,9 @@ class PlayerViewModel : ViewModel() {
         Logger.w(
             "PlayerVM",
             "CDN fallback: reason=$reason, region=${state.regionLabel ?: "unknown"}, " +
-                "selected=${hostForPlaybackLog(state.selectedVideoUrl)}, fallback=${hostForPlaybackLog(fallbackVideoUrl)}"
+                "selected=${hostForPlaybackLog(state.selectedVideoUrl)}, fallback=${hostForPlaybackLog(fallbackVideoUrl)}, " +
+                "audio=${hostForPlaybackLog(state.selectedAudioUrl)}, fallbackAudio=${hostForPlaybackLog(state.fallbackAudioUrl)}, " +
+                "quality=${_audioQualityPreference.value}"
         )
         playResolvedPlayback(
             videoUrl = fallbackVideoUrl,
@@ -6317,6 +6832,12 @@ class PlayerViewModel : ViewModel() {
             } else {
                 current
             }
+        }
+    }
+
+    private fun hasSelectedAudioTrack(player: Player?): Boolean {
+        return player?.currentTracks?.groups.orEmpty().any { group ->
+            group.type == C.TRACK_TYPE_AUDIO && group.isSelected
         }
     }
 
@@ -6458,6 +6979,7 @@ class PlayerViewModel : ViewModel() {
         onlineCountJob?.cancel()  // 👀 取消在线人数轮询
         playbackTransitionMonitorJob?.cancel()
         aiSummaryJob?.cancel()
+        videoNoteJob?.cancel()
         activeLoadJob?.cancel()
         playerInfoJob?.cancel()
         appContext?.let { context ->

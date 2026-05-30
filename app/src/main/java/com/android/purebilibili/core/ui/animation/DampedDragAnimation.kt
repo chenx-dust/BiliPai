@@ -2,6 +2,7 @@
 package com.android.purebilibili.core.ui.animation
 
 import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.spring
 import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.gestures.awaitHorizontalTouchSlopOrCancellation
 import androidx.compose.foundation.gestures.horizontalDrag
@@ -76,6 +77,16 @@ internal class DampedDragAnimationState(
     
     /** 累计拖拽偏移量 (px) — 用于面板偏移效果 */
     private val offsetAnimation = Animatable(0f)
+
+    /**
+     * 玻璃偏移跟手弹簧：位置仍 snapTo 保证指示器即时滑动,
+     * 折射偏移单独用临界阻尼过滤输入采样抖动。
+     */
+    private val dragFollowSpring = spring<Float>(
+        dampingRatio = 1f,
+        stiffness = 1000f,
+        visibilityThreshold = 0.001f
+    )
     
     /** 当前动画位置 */
     val value: Float get() = animatable.value
@@ -179,18 +190,17 @@ internal class DampedDragAnimationState(
                 (itemCount - 1).toFloat() + motionSpec.drag.overscrollLimitItems
             )
         desiredValue = newValue
-        
-        positionJob?.cancel()
-        positionJob = scope.launch {
-            animatable.stop()
-            animatable.snapTo(newValue)
-        }
         // 累计偏移量 — 用于面板偏移
         desiredDragOffsetPx += dragAmountPx
+
+        // 指示器位置必须即时跟手;玻璃折射偏移单独阻尼,过滤拖拽采样抖动。
+        positionJob?.cancel()
         offsetJob?.cancel()
+        positionJob = scope.launch {
+            animatable.snapTo(newValue)
+        }
         offsetJob = scope.launch {
-            offsetAnimation.stop()
-            offsetAnimation.snapTo(desiredDragOffsetPx)
+            offsetAnimation.animateTo(desiredDragOffsetPx, dragFollowSpring)
         }
     }
 
@@ -328,12 +338,19 @@ internal class DampedDragAnimationState(
             pressJob = launch {
                 pressProgressAnimation.animateTo(1f, motionSpec.drag.pressSpring.toSpringSpec())
             }
-            animatable.animateTo(
-                targetValue = index.toFloat(),
-                animationSpec = motionSpec.drag.selectionSpring.toSpringSpec()
-            )
-            pressJob?.cancel()
-            pressJob = launch {
+            val releaseTargetValue = index.toFloat()
+            launch {
+                animatable.animateTo(
+                    targetValue = releaseTargetValue,
+                    animationSpec = motionSpec.drag.selectionSpring.toSpringSpec()
+                )
+            }
+            launch {
+                // 对齐 KSU：切换动画接近目标后释放按压形变，而不是等弹簧完全静止。
+                val threshold = ((itemCount - 1).toFloat() * 0.025f).coerceAtLeast(0.001f)
+                snapshotFlow { animatable.value }
+                    .filter { abs(it - releaseTargetValue) < threshold }
+                    .first()
                 pressProgressAnimation.animateTo(0f, motionSpec.drag.pressSpring.toSpringSpec())
             }
         }

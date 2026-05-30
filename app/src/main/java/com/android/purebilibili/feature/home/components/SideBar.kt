@@ -49,6 +49,7 @@ fun FrostedSideBar(
     onHomeDoubleTap: () -> Unit = {},
     visibleItems: List<BottomNavItem> = listOf(BottomNavItem.HOME, BottomNavItem.DYNAMIC, BottomNavItem.HISTORY, BottomNavItem.PROFILE),
     itemColorIndices: Map<String, Int> = emptyMap(), // Keep explicit map type to match usage
+    uiSkinDecoration: BottomBarUiSkinDecoration? = null,
     onToggleSidebar: (() -> Unit)? = null  // 📱 [平板适配] 切换到底栏
 ) {
     val haptic = rememberHapticFeedback()
@@ -119,6 +120,7 @@ fun FrostedSideBar(
                 // 颜色动画
                 val primaryColor = MaterialTheme.colorScheme.primary
                 val unselectedColor = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f)
+                val skinIconPath = uiSkinDecoration?.iconPathFor(item, selected = isSelected)
                 
                 val iconColor by animateColorAsState(
                     targetValue = if (isSelected || isPending) primaryColor else unselectedColor,
@@ -196,7 +198,17 @@ fun FrostedSideBar(
                             }
                     ) {
                          CompositionLocalProvider(LocalContentColor provides iconColor) {
-                            if (isSelected) item.selectedIcon() else item.unselectedIcon()
+                            if (skinIconPath != null) {
+                                BottomBarSkinIcon(
+                                    iconPath = skinIconPath,
+                                    contentDescription = itemLabel,
+                                    size = resolveBottomBarMiuixSkinDockIconSize()
+                                )
+                            } else if (isSelected) {
+                                item.selectedIcon()
+                            } else {
+                                item.unselectedIcon()
+                            }
                         }
                     }
                     

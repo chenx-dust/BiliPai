@@ -27,7 +27,11 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.layout.boundsInRoot
+import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -35,6 +39,9 @@ import androidx.compose.ui.unit.sp
 import coil.compose.AsyncImage
 import com.android.purebilibili.core.ui.LocalAnimatedVisibilityScope
 import com.android.purebilibili.core.ui.LocalSharedTransitionScope
+import com.android.purebilibili.core.ui.transition.LocalVideoCardSharedElementSourceRoute
+import com.android.purebilibili.core.ui.transition.videoCardShellSharedElementKey
+import com.android.purebilibili.core.util.CardPositionManager
 import com.android.purebilibili.data.model.response.ArchiveMajor
 import io.github.alexzhirkevich.cupertino.icons.CupertinoIcons
 import io.github.alexzhirkevich.cupertino.icons.filled.PlayCircle
@@ -54,22 +61,54 @@ fun VideoCardLarge(
     isCollection: Boolean = false,
     collectionTitle: String = "",
     cornerBadgeText: String? = null,
-    transitionName: String? = null
+    sharedElementKey: Any? = null
 ) {
     val context = LocalContext.current
     val coverUrl = remember(archive.cover) { normalizeDynamicCoverUrl(archive.cover) }
+    val configuration = LocalConfiguration.current
+    val density = LocalDensity.current
+    val screenWidthPx = remember(configuration.screenWidthDp, density) {
+        with(density) { configuration.screenWidthDp.dp.toPx() }
+    }
+    val screenHeightPx = remember(configuration.screenHeightDp, density) {
+        with(density) { configuration.screenHeightDp.dp.toPx() }
+    }
+    val sourceRoute = LocalVideoCardSharedElementSourceRoute.current
+    val cardBoundsRef = remember { object { var value: androidx.compose.ui.geometry.Rect? = null } }
+    val triggerClick = {
+        cardBoundsRef.value?.let { bounds ->
+            CardPositionManager.recordVideoCardPosition(
+                bvid = archive.bvid,
+                sourceRoute = sourceRoute,
+                bounds = bounds,
+                screenWidth = screenWidthPx,
+                screenHeight = screenHeightPx,
+                density = density.density
+            )
+        }
+        onClick()
+    }
 
     var modifier = Modifier
         .fillMaxWidth()
-        .clickable(onClick = onClick)
+        .onGloballyPositioned { coordinates ->
+            cardBoundsRef.value = coordinates.boundsInRoot()
+        }
+        .clickable(onClick = triggerClick)
 
     val sharedTransitionScope = LocalSharedTransitionScope.current
     val animatedVisibilityScope = LocalAnimatedVisibilityScope.current
 
-    if (transitionName != null && sharedTransitionScope != null && animatedVisibilityScope != null) {
+    val effectiveSharedElementKey = if (archive.bvid.isNotBlank() && sourceRoute != null) {
+        videoCardShellSharedElementKey(archive.bvid, sourceRoute = sourceRoute)
+    } else {
+        sharedElementKey
+    }
+
+    if (effectiveSharedElementKey != null && sharedTransitionScope != null && animatedVisibilityScope != null) {
         with(sharedTransitionScope) {
             modifier = modifier.sharedElement(
-                sharedContentState = rememberSharedContentState(key = transitionName),
+                sharedContentState = rememberSharedContentState(key = effectiveSharedElementKey),
                 animatedVisibilityScope = animatedVisibilityScope
             )
         }
