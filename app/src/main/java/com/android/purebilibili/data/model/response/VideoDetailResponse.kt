@@ -127,6 +127,9 @@ data class VideoTagResponse(
 data class VideoTag(
     val tag_id: Long = 0,
     val tag_name: String = "",
+    val music_id: String = "",
+    val tag_type: String = "",
+    val jump_url: String = "",
     val cover: String = "",
     val content: String = "",
     val short_content: String = "",
@@ -176,6 +179,8 @@ data class UgcEpisodeArc(
     val aid: Long = 0,
     val pic: String = "",
     val title: String = "",
+    val pubdate: Long = 0,
+    val ctime: Long = 0,
     val duration: Int = 0,
     val stat: Stat? = null
 )

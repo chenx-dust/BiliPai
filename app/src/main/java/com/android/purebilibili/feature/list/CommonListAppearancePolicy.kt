@@ -7,7 +7,7 @@ import com.android.purebilibili.core.store.resolveEffectiveLiquidGlassEnabled
 import com.android.purebilibili.core.store.resolveHomeHeaderBlurEnabled
 import com.android.purebilibili.core.theme.AndroidNativeVariant
 import com.android.purebilibili.core.theme.UiPreset
-import com.android.purebilibili.core.theme.isMaterial3ExpressiveVariant
+import com.android.purebilibili.core.ui.resolveCompactCapsuleChromeSpec
 
 internal data class CommonListVideoCardAppearance(
     val glassEnabled: Boolean,
@@ -68,8 +68,8 @@ internal fun resolveCommonListVideoCardAppearance(
             androidNativeLiquidGlassEnabled = homeSettings.androidNativeLiquidGlassEnabled
         ),
         blurEnabled = headerBlurEnabled || homeSettings.isBottomBarBlurEnabled,
-        showCoverGlassBadges = homeSettings.showHomeCoverGlassBadges,
-        showInfoGlassBadges = homeSettings.showHomeInfoGlassBadges
+        showCoverGlassBadges = false,
+        showInfoGlassBadges = false
     )
 }
 
@@ -77,37 +77,19 @@ internal fun resolveCommonListFavoriteHeaderLayout(
     uiPreset: UiPreset,
     androidNativeVariant: AndroidNativeVariant = AndroidNativeVariant.MATERIAL3
 ): CommonListFavoriteHeaderLayout {
+    val compactChrome = resolveCompactCapsuleChromeSpec(uiPreset, androidNativeVariant)
     return when {
-        isMaterial3ExpressiveVariant(uiPreset, androidNativeVariant) -> {
-            CommonListFavoriteHeaderLayout(
-                searchBarHeightDp = 56,
-                searchBarHorizontalPaddingDp = 18,
-                searchBarVerticalPaddingDp = 8,
-                browseToggleHeightDp = 44,
-                browseToggleIndicatorHeightDp = 40,
-                browseToggleLabelFontSizeSp = 15,
-                browseToggleHorizontalPaddingDp = 18,
-                browseToggleTopPaddingDp = 4,
-                folderChipMinHeightDp = 40,
-                folderChipHorizontalPaddingDp = 14,
-                folderChipRowHorizontalPaddingDp = 18,
-                folderChipRowTopPaddingDp = 8,
-                folderChipSpacingDp = 10,
-                headerBottomPaddingDp = 8,
-                headerBackgroundAlphaMultiplier = 0.9f
-            )
-        }
         uiPreset == UiPreset.MD3 && androidNativeVariant == AndroidNativeVariant.MIUIX -> {
             CommonListFavoriteHeaderLayout(
-                searchBarHeightDp = 46,
+                searchBarHeightDp = compactChrome.primaryHeightDp,
                 searchBarHorizontalPaddingDp = 16,
                 searchBarVerticalPaddingDp = 6,
-                browseToggleHeightDp = 38,
-                browseToggleIndicatorHeightDp = 34,
+                browseToggleHeightDp = compactChrome.primaryHeightDp,
+                browseToggleIndicatorHeightDp = 30,
                 browseToggleLabelFontSizeSp = 14,
                 browseToggleHorizontalPaddingDp = 16,
                 browseToggleTopPaddingDp = 2,
-                folderChipMinHeightDp = 36,
+                folderChipMinHeightDp = compactChrome.chipHeightDp,
                 folderChipHorizontalPaddingDp = 12,
                 folderChipRowHorizontalPaddingDp = 16,
                 folderChipRowTopPaddingDp = 6,
@@ -118,15 +100,15 @@ internal fun resolveCommonListFavoriteHeaderLayout(
         }
         uiPreset == UiPreset.MD3 -> {
             CommonListFavoriteHeaderLayout(
-                searchBarHeightDp = 48,
+                searchBarHeightDp = compactChrome.primaryHeightDp,
                 searchBarHorizontalPaddingDp = 16,
                 searchBarVerticalPaddingDp = 6,
-                browseToggleHeightDp = 38,
-                browseToggleIndicatorHeightDp = 34,
+                browseToggleHeightDp = compactChrome.primaryHeightDp,
+                browseToggleIndicatorHeightDp = 30,
                 browseToggleLabelFontSizeSp = 14,
                 browseToggleHorizontalPaddingDp = 16,
                 browseToggleTopPaddingDp = 2,
-                folderChipMinHeightDp = 36,
+                folderChipMinHeightDp = compactChrome.chipHeightDp,
                 folderChipHorizontalPaddingDp = 12,
                 folderChipRowHorizontalPaddingDp = 16,
                 folderChipRowTopPaddingDp = 6,
@@ -137,15 +119,15 @@ internal fun resolveCommonListFavoriteHeaderLayout(
         }
         else -> {
             CommonListFavoriteHeaderLayout(
-                searchBarHeightDp = 36,
+                searchBarHeightDp = compactChrome.primaryHeightDp,
                 searchBarHorizontalPaddingDp = 16,
                 searchBarVerticalPaddingDp = 6,
-                browseToggleHeightDp = 34,
+                browseToggleHeightDp = compactChrome.primaryHeightDp,
                 browseToggleIndicatorHeightDp = 30,
                 browseToggleLabelFontSizeSp = 14,
                 browseToggleHorizontalPaddingDp = 16,
                 browseToggleTopPaddingDp = 2,
-                folderChipMinHeightDp = 32,
+                folderChipMinHeightDp = compactChrome.compactChipHeightDp,
                 folderChipHorizontalPaddingDp = 11,
                 folderChipRowHorizontalPaddingDp = 12,
                 folderChipRowTopPaddingDp = 6,

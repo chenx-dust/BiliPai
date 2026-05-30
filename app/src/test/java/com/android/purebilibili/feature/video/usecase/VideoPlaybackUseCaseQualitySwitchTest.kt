@@ -278,6 +278,21 @@ class VideoPlaybackUseCaseQualitySwitchTest {
     }
 
     @Test
+    fun `resolveAutoHighestTargetQuality treats video highest as normal target`() {
+        val useCase = VideoPlaybackUseCase()
+
+        val result = useCase.resolveAutoHighestTargetQuality(
+            acceptQualities = listOf(116, 80, 64),
+            isLoggedIn = true,
+            isVip = true,
+            isHdrSupported = true,
+            isDolbyVisionSupported = false
+        )
+
+        assertEquals(116, result)
+    }
+
+    @Test
     fun `resolveAutoHighestTargetQuality caps vip auto highest at hdr before 8k`() {
         val useCase = VideoPlaybackUseCase()
 
@@ -310,6 +325,31 @@ class VideoPlaybackUseCaseQualitySwitchTest {
 
         assertEquals(
             "PLAY_DIAG playback_selection bvid=BV1TEST12345 cid=9527 default=80 target=80 returned=64 selectedDash=80 merged=[80, 64, 32, 16] isLoggedIn=true isVip=false",
+            result
+        )
+    }
+
+    @Test
+    fun `buildPlaybackSelectionSummary includes selected stream bitrate when available`() {
+        val useCase = VideoPlaybackUseCase()
+
+        val result = useCase.buildPlaybackSelectionSummary(
+            bvid = "BV1TEST12345",
+            cid = 9527L,
+            defaultQuality = 80,
+            targetQuality = 80,
+            returnedQuality = 80,
+            selectedDashQuality = 80,
+            selectedDashCodec = "hev1.1.6.L120.90",
+            selectedDashBandwidth = 900_000,
+            selectedAudioBandwidth = 64_000,
+            mergedQualityIds = listOf(80, 64, 32),
+            isLoggedIn = true,
+            isVip = false
+        )
+
+        assertEquals(
+            "PLAY_DIAG playback_selection bvid=BV1TEST12345 cid=9527 default=80 target=80 returned=80 selectedDash=80 selectedCodec=hev1.1.6.L120.90 selectedBandwidth=900000 selectedAudioBandwidth=64000 merged=[80, 64, 32] isLoggedIn=true isVip=false",
             result
         )
     }

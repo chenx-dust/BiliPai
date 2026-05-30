@@ -56,6 +56,30 @@ class TopTabMotionVelocityTest {
     }
 
     @Test
+    fun `held pager drag keeps top tab indicator interacting even when scroll flag drops`() {
+        val interacting = shouldTopTabIndicatorBeInteracting(
+            pagerIsDragging = true,
+            pagerIsScrolling = false,
+            combinedVelocityPxPerSecond = 0f,
+            liquidGlassEnabled = true
+        )
+
+        assertEquals(true, interacting)
+    }
+
+    @Test
+    fun `liquid glass top tab keeps enlarged interaction briefly after pager stops`() {
+        assertEquals(
+            140L,
+            resolveTopTabIndicatorInteractionReleaseDelayMillis(liquidGlassEnabled = true)
+        )
+        assertEquals(
+            0L,
+            resolveTopTabIndicatorInteractionReleaseDelayMillis(liquidGlassEnabled = false)
+        )
+    }
+
+    @Test
     fun `tiny pager jitter is ignored by horizontal delta resolver`() {
         val delta = resolveTopTabHorizontalDeltaPx(
             positionDeltaPages = 0.0008f,
@@ -98,13 +122,13 @@ class TopTabMotionVelocityTest {
     }
 
     @Test
-    fun `indicator clamp shift follows manual top tab row scroll`() {
+    fun `indicator clamp shift ignores manual top tab row scroll`() {
         val shift = resolveTopTabIndicatorViewportClampShiftPx(
             rowScrollOffsetPx = 240f,
             indicatorPanelOffsetPx = 8f
         )
 
-        assertEquals(232f, shift, 0.0001f)
+        assertEquals(0f, shift, 0.0001f)
     }
 
     @Test
@@ -144,6 +168,46 @@ class TopTabMotionVelocityTest {
             0.72f,
             resolveTopTabNeutralIndicatorTintAlpha(isDarkTheme = false, configuredAlpha = 0.72f),
             0.001f
+        )
+    }
+
+    @Test
+    fun `ios capsule translation follows fractional pager position with viewport offset`() {
+        val translation = resolveIosTopTabCapsuleTranslationPx(
+            absolutePagerPosition = 1.4f,
+            itemWidthPx = 100f,
+            rowScrollOffsetPx = 20f,
+            contentPaddingPx = 2f
+        )
+
+        assertEquals(122f, translation, 0.001f)
+    }
+
+    @Test
+    fun `ios capsule uses moving shared container instead of per item fill`() {
+        assertEquals(
+            false,
+            shouldDrawLightweightTopTabItemContainer(
+                renderer = HomeTopTabRenderer.IOS,
+                skinPlainStyle = false,
+                hasSkinStickerIcon = false
+            )
+        )
+        assertEquals(
+            true,
+            shouldDrawLightweightTopTabItemContainer(
+                renderer = HomeTopTabRenderer.MD3,
+                skinPlainStyle = false,
+                hasSkinStickerIcon = false
+            )
+        )
+        assertEquals(
+            true,
+            shouldDrawLightweightTopTabItemContainer(
+                renderer = HomeTopTabRenderer.IOS,
+                skinPlainStyle = false,
+                hasSkinStickerIcon = true
+            )
         )
     }
 

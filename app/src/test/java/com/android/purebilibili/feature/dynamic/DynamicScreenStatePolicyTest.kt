@@ -14,7 +14,7 @@ class DynamicScreenStatePolicyTest {
     @Test
     fun `horizontal dynamic header reserves top user list height at rest`() {
         assertEquals(
-            148,
+            184,
             resolveDynamicListTopPaddingExtraDp(
                 isHorizontalMode = true,
                 isHorizontalUserListCollapsed = false
@@ -98,6 +98,28 @@ class DynamicScreenStatePolicyTest {
     }
 
     @Test
+    fun `static empty dynamic content should reveal bottom bar`() {
+        assertTrue(
+            shouldRevealDynamicBottomBarForStaticContent(
+                activeItemsCount = 0,
+                isLoading = false
+            )
+        )
+        assertFalse(
+            shouldRevealDynamicBottomBarForStaticContent(
+                activeItemsCount = 0,
+                isLoading = true
+            )
+        )
+        assertFalse(
+            shouldRevealDynamicBottomBarForStaticContent(
+                activeItemsCount = 1,
+                isLoading = false
+            )
+        )
+    }
+
+    @Test
     fun `comment sheet should only show when a dynamic is selected`() {
         assertTrue(shouldShowDynamicCommentSheet("dyn:123"))
         assertFalse(shouldShowDynamicCommentSheet(null))
@@ -109,6 +131,37 @@ class DynamicScreenStatePolicyTest {
         assertEquals(26, resolveDynamicCommentSheetTotalCount(liveCount = 26, fallbackCount = 12))
         assertEquals(12, resolveDynamicCommentSheetTotalCount(liveCount = 0, fallbackCount = 12))
         assertEquals(0, resolveDynamicCommentSheetTotalCount(liveCount = 0, fallbackCount = -3))
+    }
+
+    @Test
+    fun `unfollowed author is removed from cached dynamic lists`() {
+        val state = DynamicUiState(
+            items = listOf(
+                buildDynamicItem(id = "100", authorMid = 11L),
+                buildDynamicItem(id = "101", authorMid = 12L)
+            ),
+            userItems = listOf(
+                buildDynamicItem(id = "200", authorMid = 11L),
+                buildDynamicItem(id = "201", authorMid = 13L)
+            )
+        )
+
+        val updated = resolveDynamicStateAfterAuthorUnfollow(state, authorMid = 11L)
+
+        assertEquals(listOf("101"), updated.items.map { it.id_str })
+        assertEquals(listOf("201"), updated.userItems.map { it.id_str })
+    }
+
+    @Test
+    fun `unfollowed author is removed from followed user sidebar`() {
+        val users = listOf(
+            SidebarUser(uid = 11L, name = "removed", face = ""),
+            SidebarUser(uid = 12L, name = "kept", face = "")
+        )
+
+        val updated = resolveFollowedUsersAfterAuthorUnfollow(users, authorMid = 11L)
+
+        assertEquals(listOf(12L), updated.map { it.uid })
     }
 
     @Test
@@ -180,6 +233,41 @@ class DynamicScreenStatePolicyTest {
         assertTrue(shouldUseSelectedUserDynamicFeed(selectedTab = 4, selectedUserId = 10001L))
         assertFalse(shouldUseSelectedUserDynamicFeed(selectedTab = 0, selectedUserId = 10001L))
         assertFalse(shouldUseSelectedUserDynamicFeed(selectedTab = 4, selectedUserId = null))
+    }
+
+    @Test
+    fun `non up tab clears selected user highlight`() {
+        assertNull(resolveDynamicSelectedUserForTab(selectedTab = 0, selectedUserId = 10001L))
+        assertNull(resolveDynamicSelectedUserForTab(selectedTab = 2, selectedUserId = 10001L))
+        assertEquals(10001L, resolveDynamicSelectedUserForTab(selectedTab = 4, selectedUserId = 10001L))
+    }
+
+    @Test
+    fun `feed should reset scroll when tab or selected user source changes`() {
+        assertTrue(
+            shouldResetDynamicFeedScrollOnSourceChange(
+                previousTab = 4,
+                nextTab = 0,
+                previousSelectedUserId = 10001L,
+                nextSelectedUserId = null
+            )
+        )
+        assertTrue(
+            shouldResetDynamicFeedScrollOnSourceChange(
+                previousTab = 4,
+                nextTab = 4,
+                previousSelectedUserId = 10001L,
+                nextSelectedUserId = 10002L
+            )
+        )
+        assertFalse(
+            shouldResetDynamicFeedScrollOnSourceChange(
+                previousTab = 0,
+                nextTab = 0,
+                previousSelectedUserId = null,
+                nextSelectedUserId = null
+            )
+        )
     }
 
     @Test
@@ -451,10 +539,11 @@ class DynamicScreenStatePolicyTest {
 
 private fun buildDynamicItem(
     id: String,
+    authorMid: Long = 0L,
     pubTs: Long = 0L
 ) = DynamicItem(
     id_str = id,
     modules = DynamicModules(
-        module_author = DynamicAuthorModule(pub_ts = pubTs)
+        module_author = DynamicAuthorModule(mid = authorMid, pub_ts = pubTs)
     )
 )

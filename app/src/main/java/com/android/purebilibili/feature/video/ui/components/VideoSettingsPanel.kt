@@ -222,25 +222,52 @@ fun VideoSettingsPanel(
     val scope = rememberCoroutineScope()
     val seekForwardSeconds by com.android.purebilibili.core.store.SettingsManager
         .getSeekForwardSeconds(context)
-        .collectAsState(initial = 10)
+        .collectAsState(
+            initial = 10,
+            context = kotlin.coroutines.EmptyCoroutineContext
+        )
     val seekBackwardSeconds by com.android.purebilibili.core.store.SettingsManager
         .getSeekBackwardSeconds(context)
-        .collectAsState(initial = 10)
+        .collectAsState(
+            initial = 10,
+            context = kotlin.coroutines.EmptyCoroutineContext
+        )
     val longPressSpeed by com.android.purebilibili.core.store.SettingsManager
         .getLongPressSpeed(context)
-        .collectAsState(initial = 2.0f)
+        .collectAsState(
+            initial = 2.0f,
+            context = kotlin.coroutines.EmptyCoroutineContext
+        )
+    val longPressSpeedLockEnabled by com.android.purebilibili.core.store.SettingsManager
+        .getLongPressSpeedLockEnabled(context)
+        .collectAsState(
+            initial = false,
+            context = kotlin.coroutines.EmptyCoroutineContext
+        )
     val twoFingerVerticalSpeedEnabled by com.android.purebilibili.core.store.SettingsManager
         .getTwoFingerVerticalSpeedEnabled(context)
-        .collectAsState(initial = false)
+        .collectAsState(
+            initial = false,
+            context = kotlin.coroutines.EmptyCoroutineContext
+        )
     val twoFingerHorizontalSpeedEnabled by com.android.purebilibili.core.store.SettingsManager
         .getTwoFingerHorizontalSpeedEnabled(context)
-        .collectAsState(initial = false)
+        .collectAsState(
+            initial = false,
+            context = kotlin.coroutines.EmptyCoroutineContext
+        )
     val defaultPlaybackSpeed by com.android.purebilibili.core.store.SettingsManager
         .getDefaultPlaybackSpeed(context)
-        .collectAsState(initial = 1.0f)
+        .collectAsState(
+            initial = 1.0f,
+            context = kotlin.coroutines.EmptyCoroutineContext
+        )
     val rememberLastPlaybackSpeed by com.android.purebilibili.core.store.SettingsManager
         .getRememberLastPlaybackSpeed(context)
-        .collectAsState(initial = false)
+        .collectAsState(
+            initial = false,
+            context = kotlin.coroutines.EmptyCoroutineContext
+        )
     val timerIcon = rememberAppTimerIcon()
     val refreshIcon = rememberAppRefreshIcon()
     val photoIcon = rememberAppPhotoIcon()
@@ -949,7 +976,10 @@ fun VideoSettingsPanel(
                 ) {
                     val doubleTapSeekEnabled by com.android.purebilibili.core.store.SettingsManager
                         .getDoubleTapSeekEnabled(context)
-                        .collectAsState(initial = true)
+                        .collectAsState(
+                            initial = false,
+                            context = kotlin.coroutines.EmptyCoroutineContext
+                        )
 
                     Row(
                         verticalAlignment = Alignment.CenterVertically,
@@ -1076,6 +1106,51 @@ fun VideoSettingsPanel(
                                 com.android.purebilibili.core.store.SettingsManager.setLongPressSpeed(context, speed)
                             }
                         }
+                    )
+                }
+                SettingsDivider()
+            }
+
+            item {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 16.dp, vertical = 8.dp)
+                ) {
+                    Icon(
+                        imageVector = gestureTapIcon,
+                        contentDescription = null,
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.size(24.dp)
+                    )
+                    Spacer(modifier = Modifier.width(16.dp))
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(
+                            text = "长按倍速锁定",
+                            fontSize = 16.sp,
+                            fontWeight = FontWeight.Medium,
+                            color = MaterialTheme.colorScheme.onSurface
+                        )
+                        Text(
+                            text = "长按后拖至上下区域保持倍速",
+                            fontSize = 13.sp,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                    Switch(
+                        checked = longPressSpeedLockEnabled,
+                        onCheckedChange = { checked ->
+                            scope.launch {
+                                com.android.purebilibili.core.store.SettingsManager
+                                    .setLongPressSpeedLockEnabled(context, checked)
+                                if (checked) {
+                                    com.android.purebilibili.core.store.SettingsManager
+                                        .setLongPressSpeedLockHintShown(context, true)
+                                }
+                            }
+                        },
+                        modifier = Modifier.scale(0.8f)
                     )
                 }
                 SettingsDivider()

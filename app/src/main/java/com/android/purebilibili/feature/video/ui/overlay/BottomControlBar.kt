@@ -20,7 +20,9 @@ import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.graphics.drawscope.Stroke
 //  Cupertino Icons
 import io.github.alexzhirkevich.cupertino.icons.CupertinoIcons
 import io.github.alexzhirkevich.cupertino.icons.filled.*
@@ -44,6 +46,8 @@ import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import com.android.purebilibili.core.util.FormatUtils
 import com.android.purebilibili.data.model.response.SponsorProgressMarker
+import com.android.purebilibili.feature.video.progress.PbpRidgeDensity
+import com.android.purebilibili.feature.video.progress.PbpRidgeSample
 import com.android.purebilibili.feature.video.ui.components.SeekPreviewBubble
 import com.android.purebilibili.feature.video.ui.components.SeekPreviewBubblePlacement
 import com.android.purebilibili.feature.video.ui.components.SeekPreviewBubbleSimple
@@ -200,8 +204,20 @@ internal fun shouldShowNextEpisodeButtonInControlBar(
 
 internal fun shouldShowEpisodeButtonInControlBar(
     isFullscreen: Boolean,
-    hasEpisodeEntry: Boolean
-): Boolean = isFullscreen && hasEpisodeEntry
+    hasEpisodeEntry: Boolean,
+    widthDp: Int = Int.MAX_VALUE
+): Boolean = isFullscreen && hasEpisodeEntry && widthDp >= 600
+
+internal fun shouldShowEpisodeInMoreActions(
+    isFullscreen: Boolean,
+    hasEpisodeEntry: Boolean,
+    showInlineEpisodeButton: Boolean
+): Boolean = isFullscreen && hasEpisodeEntry && !showInlineEpisodeButton
+
+internal fun shouldShowDanmakuInputInControlBar(
+    isFullscreen: Boolean,
+    widthDp: Int
+): Boolean = isFullscreen && widthDp >= 600
 
 internal fun shouldShowPlaybackOrderLabelInControlBar(
     isFullscreen: Boolean,
@@ -214,13 +230,15 @@ internal fun shouldShowAspectRatioButtonInControlBar(
 
 internal fun shouldShowMoreActionsButtonInControlBar(
     isFullscreen: Boolean,
+    showEpisodeInMoreActions: Boolean = false,
     showNextEpisodeButton: Boolean,
     showPlaybackOrderLabel: Boolean,
     showAspectRatioButton: Boolean,
     showPortraitSwitchButton: Boolean
 ): Boolean {
     return isFullscreen && (
-        showNextEpisodeButton ||
+        showEpisodeInMoreActions ||
+            showNextEpisodeButton ||
             showPlaybackOrderLabel ||
             showAspectRatioButton ||
             showPortraitSwitchButton
@@ -337,6 +355,7 @@ fun BottomControlBar(
     videoshotData: com.android.purebilibili.data.model.response.VideoshotData? = null,
     viewPoints: List<com.android.purebilibili.data.model.response.ViewPoint> = emptyList(),
     sponsorMarkers: List<SponsorProgressMarker> = emptyList(),
+    pbpRidgeSamples: List<PbpRidgeSample> = emptyList(),
     currentChapter: String? = null,
     onChapterClick: () -> Unit = {},
     
@@ -418,10 +437,24 @@ fun BottomControlBar(
     val fullscreenToggleTouchTargetDp = remember(layoutPolicy.fullscreenIconSizeDp) {
         resolveFullscreenToggleTouchTargetDp(iconSizeDp = layoutPolicy.fullscreenIconSizeDp)
     }
-    val showEpisodeButton = remember(isFullscreen, hasEpisodeEntry) {
+    val showEpisodeButton = remember(isFullscreen, hasEpisodeEntry, configuration.screenWidthDp) {
         shouldShowEpisodeButtonInControlBar(
             isFullscreen = isFullscreen,
-            hasEpisodeEntry = hasEpisodeEntry
+            hasEpisodeEntry = hasEpisodeEntry,
+            widthDp = configuration.screenWidthDp
+        )
+    }
+    val showEpisodeInMoreActions = remember(isFullscreen, hasEpisodeEntry, showEpisodeButton) {
+        shouldShowEpisodeInMoreActions(
+            isFullscreen = isFullscreen,
+            hasEpisodeEntry = hasEpisodeEntry,
+            showInlineEpisodeButton = showEpisodeButton
+        )
+    }
+    val showDanmakuInput = remember(isFullscreen, configuration.screenWidthDp) {
+        shouldShowDanmakuInputInControlBar(
+            isFullscreen = isFullscreen,
+            widthDp = configuration.screenWidthDp
         )
     }
     var showMoreActionsPanel by remember { mutableStateOf(false) }
@@ -462,6 +495,7 @@ fun BottomControlBar(
     }
     val showMoreActionsButton = remember(
         isFullscreen,
+        showEpisodeInMoreActions,
         showNextEpisodeButton,
         showPlaybackOrderLabel,
         showAspectRatioButton,
@@ -469,6 +503,7 @@ fun BottomControlBar(
     ) {
         shouldShowMoreActionsButtonInControlBar(
             isFullscreen = isFullscreen,
+            showEpisodeInMoreActions = showEpisodeInMoreActions,
             showNextEpisodeButton = showNextEpisodeButton,
             showPlaybackOrderLabel = showPlaybackOrderLabel,
             showAspectRatioButton = showAspectRatioButton,
@@ -525,6 +560,7 @@ fun BottomControlBar(
             videoshotData = videoshotData,
             viewPoints = viewPoints,
             sponsorMarkers = sponsorMarkers,
+            pbpRidgeSamples = pbpRidgeSamples,
             currentChapter = currentChapter,
             onChapterClick = onChapterClick
         )
@@ -597,50 +633,54 @@ fun BottomControlBar(
                     )
                 }
                 
-                Spacer(modifier = Modifier.width(layoutPolicy.danmakuSwitchToInputSpacingDp.dp))
-                
-                // Danmaku Input Box
-                Box(
-                    modifier = Modifier
-                        .weight(1f)
-                        .height(layoutPolicy.danmakuInputHeightDp.dp)
-                        .clip(RoundedCornerShape((layoutPolicy.danmakuInputHeightDp / 2).dp))
-                        .background(Color.White.copy(alpha = 0.2f))
-                        .consumeTap(onDanmakuInputClick),
-                    contentAlignment = Alignment.CenterStart
-                ) {
-                    Text(
-                        text = "发个友善的弹幕见证当下...",
-                        color = Color.White.copy(alpha = 0.7f),
-                        fontSize = layoutPolicy.danmakuInputFontSp.sp,
-                        maxLines = danmakuPlaceholderPolicy.maxLines,
-                        overflow = if (danmakuPlaceholderPolicy.ellipsis) TextOverflow.Ellipsis else TextOverflow.Clip,
+                if (showDanmakuInput) {
+                    Spacer(modifier = Modifier.width(layoutPolicy.danmakuSwitchToInputSpacingDp.dp))
+
+                    // Danmaku Input Box
+                    Box(
                         modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(
-                                start = layoutPolicy.danmakuInputStartPaddingDp.dp,
-                                end = danmakuPlaceholderPolicy.trailingTextPaddingDp.dp
-                            )
-                    )
-                    
-                    // Settings Icon inside input bar (right)
-                    IconButton(
-                        onClick = onDanmakuSettingsClick,
-                        modifier = Modifier
-                            .align(Alignment.CenterEnd)
-                            .padding(end = layoutPolicy.danmakuSettingEndPaddingDp.dp)
-                            .size(layoutPolicy.danmakuSettingButtonSizeDp.dp)
+                            .weight(1f)
+                            .height(layoutPolicy.danmakuInputHeightDp.dp)
+                            .clip(RoundedCornerShape((layoutPolicy.danmakuInputHeightDp / 2).dp))
+                            .background(Color.White.copy(alpha = 0.2f))
+                            .consumeTap(onDanmakuInputClick),
+                        contentAlignment = Alignment.CenterStart
                     ) {
-                        Icon(
-                            imageVector = CupertinoIcons.Default.Gearshape,
-                            contentDescription = "Settings",
-                            tint = Color.White.copy(alpha = 0.8f),
-                            modifier = Modifier.size(layoutPolicy.danmakuSettingIconSizeDp.dp)
+                        Text(
+                            text = "发个友善的弹幕见证当下...",
+                            color = Color.White.copy(alpha = 0.7f),
+                            fontSize = layoutPolicy.danmakuInputFontSp.sp,
+                            maxLines = danmakuPlaceholderPolicy.maxLines,
+                            overflow = if (danmakuPlaceholderPolicy.ellipsis) TextOverflow.Ellipsis else TextOverflow.Clip,
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(
+                                    start = layoutPolicy.danmakuInputStartPaddingDp.dp,
+                                    end = danmakuPlaceholderPolicy.trailingTextPaddingDp.dp
+                                )
                         )
+
+                        // Settings Icon inside input bar (right)
+                        IconButton(
+                            onClick = onDanmakuSettingsClick,
+                            modifier = Modifier
+                                .align(Alignment.CenterEnd)
+                                .padding(end = layoutPolicy.danmakuSettingEndPaddingDp.dp)
+                                .size(layoutPolicy.danmakuSettingButtonSizeDp.dp)
+                        ) {
+                            Icon(
+                                imageVector = CupertinoIcons.Default.Gearshape,
+                                contentDescription = "Settings",
+                                tint = Color.White.copy(alpha = 0.8f),
+                                modifier = Modifier.size(layoutPolicy.danmakuSettingIconSizeDp.dp)
+                            )
+                        }
                     }
+
+                    Spacer(modifier = Modifier.width(layoutPolicy.afterInputSpacingDp.dp))
+                } else {
+                    Spacer(modifier = Modifier.weight(1f))
                 }
-                
-                Spacer(modifier = Modifier.width(layoutPolicy.afterInputSpacingDp.dp))
             } else {
                 Spacer(modifier = Modifier.weight(1f))
             }
@@ -861,6 +901,16 @@ fun BottomControlBar(
                     horizontalAlignment = Alignment.CenterHorizontally,
                     verticalArrangement = Arrangement.spacedBy(6.dp)
                 ) {
+                    if (showEpisodeInMoreActions) {
+                        MoreActionTextButton(
+                            label = "分集",
+                            minWidthDp = moreActionItemMinWidthDp,
+                            onClick = {
+                                showMoreActionsPanel = false
+                                onEpisodeClick()
+                            }
+                        )
+                    }
                     if (showNextEpisodeButton) {
                         MoreActionTextButton(
                             label = "下集",
@@ -1014,6 +1064,7 @@ fun VideoProgressBar(
     videoshotData: com.android.purebilibili.data.model.response.VideoshotData? = null,
     viewPoints: List<com.android.purebilibili.data.model.response.ViewPoint> = emptyList(),
     sponsorMarkers: List<SponsorProgressMarker> = emptyList(),
+    pbpRidgeSamples: List<PbpRidgeSample> = emptyList(),
     currentChapter: String? = null,
     onChapterClick: () -> Unit = {}
 ) {
@@ -1220,6 +1271,79 @@ fun VideoProgressBar(
                         size = Size(width.coerceAtLeast(trackHeightPx), trackHeightPx),
                         cornerRadius = cornerRadius
                     )
+                }
+
+                fun resolveRidgeY(
+                    baselineY: Float,
+                    ridgeHeightPx: Float,
+                    sample: PbpRidgeSample
+                ): Float {
+                    val visualIntensity = when (sample.density) {
+                        PbpRidgeDensity.QUIET -> sample.intensity * 0.78f
+                        PbpRidgeDensity.NORMAL -> sample.intensity
+                        PbpRidgeDensity.HOT -> sample.intensity * 1.14f
+                    }.coerceIn(0f, 1f)
+                    return baselineY - ridgeHeightPx * visualIntensity
+                }
+
+                if (pbpRidgeSamples.size >= 2 && size.width > 0f) {
+                    val ridgeHeightPx = (size.height * 0.42f).coerceAtMost(18.dp.toPx())
+                    val baselineY = centerY
+                    val ridgePath = Path().apply {
+                        moveTo(0f, baselineY)
+                        pbpRidgeSamples.forEach { sample ->
+                            val x = size.width * sample.fraction.coerceIn(0f, 1f)
+                            val y = resolveRidgeY(baselineY, ridgeHeightPx, sample)
+                            lineTo(x, y)
+                        }
+                        lineTo(size.width, baselineY)
+                        close()
+                    }
+                    val ridgeLinePath = Path().apply {
+                        pbpRidgeSamples.forEachIndexed { index, sample ->
+                            val x = size.width * sample.fraction.coerceIn(0f, 1f)
+                            val y = resolveRidgeY(baselineY, ridgeHeightPx, sample)
+                            if (index == 0) moveTo(x, y) else lineTo(x, y)
+                        }
+                    }
+                    drawPath(
+                        path = ridgePath,
+                        brush = Brush.verticalGradient(
+                            colors = listOf(
+                                primaryColor.copy(alpha = 0.18f),
+                                primaryColor.copy(alpha = 0.03f)
+                            ),
+                            startY = baselineY - ridgeHeightPx,
+                            endY = baselineY
+                        )
+                    )
+                    drawPath(
+                        path = ridgeLinePath,
+                        color = primaryColor.copy(alpha = 0.14f),
+                        style = Stroke(width = trackHeightPx * 2.8f, cap = StrokeCap.Round)
+                    )
+                    drawPath(
+                        path = ridgeLinePath,
+                        color = primaryColor.copy(alpha = 0.46f),
+                        style = Stroke(width = trackHeightPx * 0.9f, cap = StrokeCap.Round)
+                    )
+                    pbpRidgeSamples.zipWithNext().forEach { (start, end) ->
+                        if (start.density == PbpRidgeDensity.HOT || end.density == PbpRidgeDensity.HOT) {
+                            drawLine(
+                                color = primaryColor.copy(alpha = 0.68f),
+                                start = Offset(
+                                    x = size.width * start.fraction.coerceIn(0f, 1f),
+                                    y = resolveRidgeY(baselineY, ridgeHeightPx, start)
+                                ),
+                                end = Offset(
+                                    x = size.width * end.fraction.coerceIn(0f, 1f),
+                                    y = resolveRidgeY(baselineY, ridgeHeightPx, end)
+                                ),
+                                strokeWidth = trackHeightPx * 1.25f,
+                                cap = StrokeCap.Round
+                            )
+                        }
+                    }
                 }
 
                 drawTrack(size.width, Color.White.copy(alpha = 0.24f))

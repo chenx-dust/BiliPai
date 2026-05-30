@@ -6,6 +6,7 @@ import androidx.compose.animation.ExperimentalSharedTransitionApi
 import androidx.compose.animation.SharedTransitionScope
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.core.Animatable
 import com.android.purebilibili.core.ui.LocalSharedTransitionScope
 import com.android.purebilibili.core.ui.LocalAnimatedVisibilityScope
 import androidx.compose.animation.core.animateDpAsState
@@ -19,6 +20,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.focusable
+import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.layout.*
@@ -54,6 +56,9 @@ import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.graphics.TransformOrigin
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
@@ -62,20 +67,24 @@ import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.util.lerp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.android.purebilibili.R
 import com.android.purebilibili.core.ui.AdaptiveScaffold
 import com.android.purebilibili.core.database.entity.SearchHistory
 import com.android.purebilibili.core.ui.LoadingAnimation
 import com.android.purebilibili.core.ui.LocalGlobalWallpaperBackdropVisible
+import com.android.purebilibili.core.ui.OfficialVerifyBadge
 import com.android.purebilibili.core.ui.globalWallpaperAwareBackground
 import com.android.purebilibili.core.ui.resolveBottomSafeAreaPadding
+import com.android.purebilibili.core.ui.resolveCompactCapsuleChromeSpec
 import com.android.purebilibili.core.ui.rememberAppBackIcon
 import com.android.purebilibili.core.ui.rememberAppChevronDownIcon
 import com.android.purebilibili.core.ui.rememberAppChevronUpIcon
 import com.android.purebilibili.core.ui.rememberAppClearIcon
 import com.android.purebilibili.core.ui.rememberAppHistoryIcon
 import com.android.purebilibili.core.ui.rememberAppSearchIcon
+import com.android.purebilibili.core.ui.resolveOfficialVerifyBadge
 import com.android.purebilibili.core.ui.components.UpBadgeName
 import com.android.purebilibili.feature.home.components.cards.ElegantVideoCard  //  使用首页卡片
 import com.android.purebilibili.core.store.SettingsManager  //  读取动画设置
@@ -85,6 +94,7 @@ import com.android.purebilibili.data.repository.SearchLiveOrder
 import com.android.purebilibili.data.repository.SearchOrderSort
 import com.android.purebilibili.data.repository.SearchUpOrder
 import com.android.purebilibili.data.repository.SearchUserType
+import com.android.purebilibili.data.repository.resolveSearchDurationFilterLabel
 import com.android.purebilibili.data.model.response.VideoItem
 import com.android.purebilibili.core.util.FormatUtils
 import com.android.purebilibili.core.ui.adaptive.resolveDeviceUiProfile
@@ -99,11 +109,11 @@ import com.android.purebilibili.core.util.responsiveContentWidth
 import com.android.purebilibili.core.ui.blur.rememberRecoverableHazeState
 import dev.chrisbanes.haze.hazeSource
 import com.android.purebilibili.core.ui.blur.unifiedBlur
+import com.android.purebilibili.core.ui.motion.AppMotionEasing
 import com.android.purebilibili.core.theme.AndroidNativeVariant
 import com.android.purebilibili.core.theme.LocalAndroidNativeVariant
 import com.android.purebilibili.core.theme.LocalUiPreset
 import com.android.purebilibili.core.theme.UiPreset
-import com.android.purebilibili.core.theme.isMaterial3ExpressiveVariant
 import com.android.purebilibili.core.util.LocalWindowSizeClass
 import com.android.purebilibili.data.model.response.HotItem
 import com.android.purebilibili.data.model.response.SearchArticleItem
@@ -159,44 +169,73 @@ internal data class SearchChromeVisualSpec(
     val inputCornerRadiusDp: Int,
     val actionContainerCornerRadiusDp: Int,
     val useFilledSearchAction: Boolean,
-    val suggestionContainerCornerRadiusDp: Int
+    val suggestionContainerCornerRadiusDp: Int,
+    val clearActionSizeDp: Int,
+    val submitActionSizeDp: Int,
+    val actionIconSizeDp: Int,
+    val horizontalGapDp: Int,
+    val inputHorizontalPaddingDp: Int,
+    val chipHeightDp: Int,
+    val compactChipHeightDp: Int,
+    val chipCornerRadiusDp: Int,
+    val chipHorizontalPaddingDp: Int
 )
 
 internal fun resolveSearchChromeVisualSpec(
     uiPreset: UiPreset,
     androidNativeVariant: AndroidNativeVariant = AndroidNativeVariant.MATERIAL3
 ): SearchChromeVisualSpec {
-    return if (isMaterial3ExpressiveVariant(uiPreset, androidNativeVariant)) {
+    val compactChrome = resolveCompactCapsuleChromeSpec(uiPreset, androidNativeVariant)
+    return if (uiPreset == UiPreset.MD3 && androidNativeVariant == AndroidNativeVariant.MIUIX) {
         SearchChromeVisualSpec(
-            inputHeightDp = 56,
-            inputCornerRadiusDp = 30,
-            actionContainerCornerRadiusDp = 24,
+            inputHeightDp = compactChrome.primaryHeightDp,
+            inputCornerRadiusDp = compactChrome.primaryCornerRadiusDp,
+            actionContainerCornerRadiusDp = compactChrome.secondaryButtonCornerRadiusDp,
             useFilledSearchAction = true,
-            suggestionContainerCornerRadiusDp = 28
-        )
-    } else if (uiPreset == UiPreset.MD3 && androidNativeVariant == AndroidNativeVariant.MIUIX) {
-        SearchChromeVisualSpec(
-            inputHeightDp = 46,
-            inputCornerRadiusDp = 23,
-            actionContainerCornerRadiusDp = 18,
-            useFilledSearchAction = true,
-            suggestionContainerCornerRadiusDp = 18
+            suggestionContainerCornerRadiusDp = 18,
+            clearActionSizeDp = compactChrome.secondaryButtonSizeDp,
+            submitActionSizeDp = compactChrome.secondaryButtonSizeDp,
+            actionIconSizeDp = compactChrome.iconSizeDp,
+            horizontalGapDp = compactChrome.standardGapDp,
+            inputHorizontalPaddingDp = compactChrome.inputHorizontalPaddingDp,
+            chipHeightDp = compactChrome.chipHeightDp,
+            compactChipHeightDp = compactChrome.compactChipHeightDp,
+            chipCornerRadiusDp = compactChrome.chipCornerRadiusDp,
+            chipHorizontalPaddingDp = compactChrome.chipHorizontalPaddingDp
         )
     } else if (uiPreset == UiPreset.MD3) {
         SearchChromeVisualSpec(
-            inputHeightDp = 48,
-            inputCornerRadiusDp = 28,
-            actionContainerCornerRadiusDp = 18,
+            inputHeightDp = compactChrome.primaryHeightDp,
+            inputCornerRadiusDp = compactChrome.primaryCornerRadiusDp,
+            actionContainerCornerRadiusDp = compactChrome.secondaryButtonCornerRadiusDp,
             useFilledSearchAction = true,
-            suggestionContainerCornerRadiusDp = 20
+            suggestionContainerCornerRadiusDp = 20,
+            clearActionSizeDp = compactChrome.secondaryButtonSizeDp,
+            submitActionSizeDp = compactChrome.secondaryButtonSizeDp,
+            actionIconSizeDp = compactChrome.iconSizeDp,
+            horizontalGapDp = compactChrome.standardGapDp,
+            inputHorizontalPaddingDp = compactChrome.inputHorizontalPaddingDp,
+            chipHeightDp = compactChrome.chipHeightDp,
+            compactChipHeightDp = compactChrome.compactChipHeightDp,
+            chipCornerRadiusDp = compactChrome.chipCornerRadiusDp,
+            chipHorizontalPaddingDp = compactChrome.chipHorizontalPaddingDp
         )
     } else {
         SearchChromeVisualSpec(
-            inputHeightDp = 42,
-            inputCornerRadiusDp = 50,
-            actionContainerCornerRadiusDp = 18,
+            inputHeightDp = compactChrome.primaryHeightDp,
+            inputCornerRadiusDp = compactChrome.primaryCornerRadiusDp,
+            actionContainerCornerRadiusDp = compactChrome.secondaryButtonCornerRadiusDp,
             useFilledSearchAction = false,
-            suggestionContainerCornerRadiusDp = 12
+            suggestionContainerCornerRadiusDp = 12,
+            clearActionSizeDp = compactChrome.secondaryButtonSizeDp,
+            submitActionSizeDp = compactChrome.secondaryButtonSizeDp,
+            actionIconSizeDp = compactChrome.iconSizeDp,
+            horizontalGapDp = compactChrome.standardGapDp,
+            inputHorizontalPaddingDp = compactChrome.inputHorizontalPaddingDp,
+            chipHeightDp = compactChrome.chipHeightDp,
+            compactChipHeightDp = compactChrome.compactChipHeightDp,
+            chipCornerRadiusDp = compactChrome.chipCornerRadiusDp,
+            chipHorizontalPaddingDp = compactChrome.chipHorizontalPaddingDp
         )
     }
 }
@@ -296,6 +335,19 @@ internal fun resolveSearchFilterTabs(): List<SearchType> {
     )
 }
 
+internal fun resolveSearchSwipeTargetType(
+    currentType: SearchType,
+    dragDistancePx: Float,
+    tabs: List<SearchType> = resolveSearchFilterTabs(),
+    thresholdPx: Float = 96f
+): SearchType? {
+    val currentIndex = tabs.indexOf(currentType)
+    if (tabs.isEmpty() || currentIndex !in tabs.indices) return null
+    if (kotlin.math.abs(dragDistancePx) < thresholdPx) return null
+    val targetIndex = if (dragDistancePx > 0f) currentIndex - 1 else currentIndex + 1
+    return tabs.getOrNull(targetIndex)?.takeIf { it != currentType }
+}
+
 internal fun resolveSearchFilterControls(
     currentType: SearchType,
     currentUpOrder: SearchUpOrder
@@ -323,6 +375,34 @@ internal fun resolveSearchFilterControls(
     }
 }
 
+internal data class SearchTypeTabLayoutSpec(
+    val horizontalSpacingDp: Int,
+    val verticalSpacingDp: Int,
+    val horizontalPaddingDp: Int,
+    val minHeightDp: Int,
+    val fontSizeSp: Int
+)
+
+internal fun resolveSearchTypeTabLayoutSpec(widthDp: Int): SearchTypeTabLayoutSpec {
+    return if (widthDp < 400) {
+        SearchTypeTabLayoutSpec(
+            horizontalSpacingDp = 6,
+            verticalSpacingDp = 6,
+            horizontalPaddingDp = 10,
+            minHeightDp = 36,
+            fontSizeSp = 13
+        )
+    } else {
+        SearchTypeTabLayoutSpec(
+            horizontalSpacingDp = 8,
+            verticalSpacingDp = 8,
+            horizontalPaddingDp = 16,
+            minHeightDp = 40,
+            fontSizeSp = 14
+        )
+    }
+}
+
 @OptIn(ExperimentalLayoutApi::class, ExperimentalSharedTransitionApi::class)
 @Composable
 fun SearchScreen(
@@ -338,7 +418,10 @@ fun SearchScreen(
     onLiveClick: (Long, String, String) -> Unit, // [新增] 直播点击
     onTopicClick: (Long) -> Unit,
     onArticleClick: (Long, String) -> Unit,
-    onAvatarClick: () -> Unit
+    onAvatarClick: () -> Unit,
+    entryMotionSource: SearchEntryMotionSource = SearchEntryMotionSource.NONE,
+    entryMotionKey: Int = 0,
+    onEntryMotionConsumed: (Int) -> Unit = {}
 ) {
     val uiPreset = LocalUiPreset.current
     val androidNativeVariant = LocalAndroidNativeVariant.current
@@ -432,8 +515,6 @@ fun SearchScreen(
     val liquidGlassEnabled by SettingsManager.getLiquidGlassEnabled(context).collectAsState(initial = true)
     val headerBlurEnabled by SettingsManager.getHeaderBlurEnabled(context).collectAsState(initial = true)
     val bottomBarBlurEnabled by SettingsManager.getBottomBarBlurEnabled(context).collectAsState(initial = true)
-    val showHomeCoverGlassBadges by SettingsManager.getHomeCoverGlassBadgesVisible(context).collectAsState(initial = true)
-    val showHomeInfoGlassBadges by SettingsManager.getHomeInfoGlassBadgesVisible(context).collectAsState(initial = true)
     val cardMotionTier = resolveEffectiveMotionTier(
         baseTier = deviceUiProfile.motionTier,
         animationEnabled = cardAnimationEnabled
@@ -446,15 +527,13 @@ fun SearchScreen(
     }
     val videoCardAppearance = remember(
         liquidGlassEnabled,
-        searchCardBlurEnabled,
-        showHomeCoverGlassBadges,
-        showHomeInfoGlassBadges
+        searchCardBlurEnabled
     ) {
         resolveSearchVideoCardAppearance(
             liquidGlassEnabled = liquidGlassEnabled,
             blurEnabled = searchCardBlurEnabled,
-            showHomeCoverGlassBadges = showHomeCoverGlassBadges,
-            showHomeInfoGlassBadges = showHomeInfoGlassBadges
+            showHomeCoverGlassBadges = false,
+            showHomeInfoGlassBadges = false
         )
     }
     val genericResultCardAppearance = remember(liquidGlassEnabled, uiPreset) {
@@ -487,6 +566,10 @@ fun SearchScreen(
             baseBudget = searchMotionBudget
         )
     }
+    val entryMotionSpec = resolveSearchEntryMotionSpec(
+        source = entryMotionSource,
+        reducedMotionBudget = searchMotionBudget == SearchMotionBudget.REDUCED
+    )
     val searchHazeEnabled = shouldEnableSearchHazeSource(
         isSearching = state.isSearching,
         startupSettled = startupSettled
@@ -585,7 +668,14 @@ fun SearchScreen(
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
                 } else {
-                    Column(modifier = Modifier.fillMaxSize()) {
+                    Column(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .searchTypeSwipe(
+                                currentType = state.searchType,
+                                onTypeChange = viewModel::setSearchType
+                            )
+                    ) {
                         //  搜索彩蛋消息横幅
                         val easterEggMsg = state.easterEggMessage
                         if (easterEggMsg != null) {
@@ -636,7 +726,7 @@ fun SearchScreen(
                                          SearchFilterBar(
                                             currentType = state.searchType,
                                             currentOrder = state.searchOrder,
-                                            currentDuration = state.searchDuration,
+                                            currentDurations = state.searchDurations,
                                             currentVideoTid = state.videoTid,
                                             currentUpOrder = state.upOrder,
                                             currentUpOrderSort = state.upOrderSort,
@@ -644,7 +734,7 @@ fun SearchScreen(
                                             currentLiveOrder = state.liveOrder,
                                             onTypeChange = { viewModel.setSearchType(it) },
                                             onOrderChange = { viewModel.setSearchOrder(it) },
-                                            onDurationChange = { viewModel.setSearchDuration(it) },
+                                            onDurationToggle = { viewModel.toggleSearchDuration(it) },
                                             onVideoTidChange = { viewModel.setVideoTid(it) },
                                             onUpOrderChange = { viewModel.setUpOrder(it) },
                                             onUpOrderSortChange = { viewModel.setUpOrderSort(it) },
@@ -665,6 +755,7 @@ fun SearchScreen(
                                             blurEnabled = videoCardAppearance.blurEnabled,
                                             showCoverGlassBadges = videoCardAppearance.showCoverGlassBadges,
                                             showInfoGlassBadges = videoCardAppearance.showInfoGlassBadges,
+                                            coverShadowEnabled = videoCardAppearance.coverShadowEnabled,
                                             showOnlineCount = showOnlineCount,
                                             modifier = Modifier,
                                             //  [交互优化] 传递 onWatchLater 用于显示菜单选项
@@ -754,7 +845,7 @@ fun SearchScreen(
                                         SearchFilterBar(
                                             currentType = state.searchType,
                                             currentOrder = state.searchOrder,
-                                            currentDuration = state.searchDuration,
+                                            currentDurations = state.searchDurations,
                                             currentVideoTid = state.videoTid,
                                             currentUpOrder = state.upOrder,
                                             currentUpOrderSort = state.upOrderSort,
@@ -762,7 +853,7 @@ fun SearchScreen(
                                             currentLiveOrder = state.liveOrder,
                                             onTypeChange = { viewModel.setSearchType(it) },
                                             onOrderChange = { viewModel.setSearchOrder(it) },
-                                            onDurationChange = { viewModel.setSearchDuration(it) },
+                                            onDurationToggle = { viewModel.toggleSearchDuration(it) },
                                             onVideoTidChange = { viewModel.setVideoTid(it) },
                                             onUpOrderChange = { viewModel.setUpOrder(it) },
                                             onUpOrderSortChange = { viewModel.setUpOrderSort(it) },
@@ -842,7 +933,7 @@ fun SearchScreen(
                                         SearchFilterBar(
                                             currentType = state.searchType,
                                             currentOrder = state.searchOrder,
-                                            currentDuration = state.searchDuration,
+                                            currentDurations = state.searchDurations,
                                             currentVideoTid = state.videoTid,
                                             currentUpOrder = state.upOrder,
                                             currentUpOrderSort = state.upOrderSort,
@@ -850,7 +941,7 @@ fun SearchScreen(
                                             currentLiveOrder = state.liveOrder,
                                             onTypeChange = { viewModel.setSearchType(it) },
                                             onOrderChange = { viewModel.setSearchOrder(it) },
-                                            onDurationChange = { viewModel.setSearchDuration(it) },
+                                            onDurationToggle = { viewModel.toggleSearchDuration(it) },
                                             onVideoTidChange = { viewModel.setVideoTid(it) },
                                             onUpOrderChange = { viewModel.setUpOrder(it) },
                                             onUpOrderSortChange = { viewModel.setUpOrderSort(it) },
@@ -907,7 +998,7 @@ fun SearchScreen(
                                         SearchFilterBar(
                                             currentType = state.searchType,
                                             currentOrder = state.searchOrder,
-                                            currentDuration = state.searchDuration,
+                                            currentDurations = state.searchDurations,
                                             currentVideoTid = state.videoTid,
                                             currentUpOrder = state.upOrder,
                                             currentUpOrderSort = state.upOrderSort,
@@ -915,7 +1006,7 @@ fun SearchScreen(
                                             currentLiveOrder = state.liveOrder,
                                             onTypeChange = { viewModel.setSearchType(it) },
                                             onOrderChange = { viewModel.setSearchOrder(it) },
-                                            onDurationChange = { viewModel.setSearchDuration(it) },
+                                            onDurationToggle = { viewModel.toggleSearchDuration(it) },
                                             onVideoTidChange = { viewModel.setVideoTid(it) },
                                             onUpOrderChange = { viewModel.setUpOrder(it) },
                                             onUpOrderSortChange = { viewModel.setUpOrderSort(it) },
@@ -993,7 +1084,7 @@ fun SearchScreen(
                                         SearchFilterBar(
                                             currentType = state.searchType,
                                             currentOrder = state.searchOrder,
-                                            currentDuration = state.searchDuration,
+                                            currentDurations = state.searchDurations,
                                             currentVideoTid = state.videoTid,
                                             currentUpOrder = state.upOrder,
                                             currentUpOrderSort = state.upOrderSort,
@@ -1001,7 +1092,7 @@ fun SearchScreen(
                                             currentLiveOrder = state.liveOrder,
                                             onTypeChange = { viewModel.setSearchType(it) },
                                             onOrderChange = { viewModel.setSearchOrder(it) },
-                                            onDurationChange = { viewModel.setSearchDuration(it) },
+                                            onDurationToggle = { viewModel.toggleSearchDuration(it) },
                                             onVideoTidChange = { viewModel.setVideoTid(it) },
                                             onUpOrderChange = { viewModel.setUpOrder(it) },
                                             onUpOrderSortChange = { viewModel.setUpOrderSort(it) },
@@ -1053,7 +1144,7 @@ fun SearchScreen(
                                         SearchFilterBar(
                                             currentType = state.searchType,
                                             currentOrder = state.searchOrder,
-                                            currentDuration = state.searchDuration,
+                                            currentDurations = state.searchDurations,
                                             currentVideoTid = state.videoTid,
                                             currentUpOrder = state.upOrder,
                                             currentUpOrderSort = state.upOrderSort,
@@ -1061,7 +1152,7 @@ fun SearchScreen(
                                             currentLiveOrder = state.liveOrder,
                                             onTypeChange = { viewModel.setSearchType(it) },
                                             onOrderChange = { viewModel.setSearchOrder(it) },
-                                            onDurationChange = { viewModel.setSearchDuration(it) },
+                                            onDurationToggle = { viewModel.toggleSearchDuration(it) },
                                             onVideoTidChange = { viewModel.setVideoTid(it) },
                                             onUpOrderChange = { viewModel.setUpOrder(it) },
                                             onUpOrderSortChange = { viewModel.setUpOrderSort(it) },
@@ -1138,7 +1229,7 @@ fun SearchScreen(
                                         SearchFilterBar(
                                             currentType = state.searchType,
                                             currentOrder = state.searchOrder,
-                                            currentDuration = state.searchDuration,
+                                            currentDurations = state.searchDurations,
                                             currentVideoTid = state.videoTid,
                                             currentUpOrder = state.upOrder,
                                             currentUpOrderSort = state.upOrderSort,
@@ -1146,7 +1237,7 @@ fun SearchScreen(
                                             currentLiveOrder = state.liveOrder,
                                             onTypeChange = { viewModel.setSearchType(it) },
                                             onOrderChange = { viewModel.setSearchOrder(it) },
-                                            onDurationChange = { viewModel.setSearchDuration(it) },
+                                            onDurationToggle = { viewModel.toggleSearchDuration(it) },
                                             onVideoTidChange = { viewModel.setVideoTid(it) },
                                             onUpOrderChange = { viewModel.setUpOrder(it) },
                                             onUpOrderSortChange = { viewModel.setUpOrderSort(it) },
@@ -1188,7 +1279,7 @@ fun SearchScreen(
                                         SearchFilterBar(
                                             currentType = state.searchType,
                                             currentOrder = state.searchOrder,
-                                            currentDuration = state.searchDuration,
+                                            currentDurations = state.searchDurations,
                                             currentVideoTid = state.videoTid,
                                             currentUpOrder = state.upOrder,
                                             currentUpOrderSort = state.upOrderSort,
@@ -1196,7 +1287,7 @@ fun SearchScreen(
                                             currentLiveOrder = state.liveOrder,
                                             onTypeChange = { viewModel.setSearchType(it) },
                                             onOrderChange = { viewModel.setSearchOrder(it) },
-                                            onDurationChange = { viewModel.setSearchDuration(it) },
+                                            onDurationToggle = { viewModel.toggleSearchDuration(it) },
                                             onVideoTidChange = { viewModel.setVideoTid(it) },
                                             onUpOrderChange = { viewModel.setUpOrder(it) },
                                             onUpOrderSortChange = { viewModel.setUpOrderSort(it) },
@@ -1287,6 +1378,9 @@ fun SearchScreen(
                     query = state.query
                 ),
                 reducedMotionBudget = effectiveSearchMotionBudget == SearchMotionBudget.REDUCED,
+                entryMotionSpec = entryMotionSpec,
+                entryMotionKey = entryMotionKey,
+                onEntryMotionFinished = onEntryMotionConsumed,
                 modifier = Modifier
                     .align(Alignment.TopCenter)
                     .then(
@@ -1355,6 +1449,34 @@ fun SearchScreen(
     }
 }
 
+private fun Modifier.searchTypeSwipe(
+    currentType: SearchType,
+    onTypeChange: (SearchType) -> Unit
+): Modifier {
+    return pointerInput(currentType) {
+        var dragDistancePx = 0f
+        detectHorizontalDragGestures(
+            onDragStart = {
+                dragDistancePx = 0f
+            },
+            onHorizontalDrag = { change, dragAmount ->
+                dragDistancePx += dragAmount
+                change.consume()
+            },
+            onDragCancel = {
+                dragDistancePx = 0f
+            },
+            onDragEnd = {
+                resolveSearchSwipeTargetType(
+                    currentType = currentType,
+                    dragDistancePx = dragDistancePx
+                )?.let(onTypeChange)
+                dragDistancePx = 0f
+            }
+        )
+    }
+}
+
 //  新设计的顶部搜索栏 (含 Focus 高亮动画)
 @Composable
 fun SearchTopBar(
@@ -1368,6 +1490,9 @@ fun SearchTopBar(
     focusRequester: androidx.compose.ui.focus.FocusRequester = remember { androidx.compose.ui.focus.FocusRequester() },
     autoFocusEnabled: Boolean = true,
     reducedMotionBudget: Boolean = false,
+    entryMotionSpec: SearchEntryMotionSpec? = null,
+    entryMotionKey: Int = 0,
+    onEntryMotionFinished: (Int) -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     val uiPreset = LocalUiPreset.current
@@ -1379,6 +1504,8 @@ fun SearchTopBar(
     val backIcon = rememberAppBackIcon()
     val searchIcon = rememberAppSearchIcon()
     val clearIcon = rememberAppClearIcon()
+    val density = LocalDensity.current
+    val entryMotionProgress = remember { Animatable(1f) }
     //  Focus 状态追踪
     var isFocused by remember { mutableStateOf(false) }
     
@@ -1416,9 +1543,49 @@ fun SearchTopBar(
         )
     }
     val canSubmit = resolvedSubmitKeyword.isNotBlank()
+    LaunchedEffect(entryMotionKey, entryMotionSpec) {
+        val spec = entryMotionSpec
+        if (spec == null) {
+            entryMotionProgress.snapTo(1f)
+            return@LaunchedEffect
+        }
+        entryMotionProgress.snapTo(0f)
+        if (spec.durationMillis <= 0) {
+            entryMotionProgress.snapTo(1f)
+        } else {
+            entryMotionProgress.animateTo(
+                targetValue = 1f,
+                animationSpec = tween(
+                    durationMillis = spec.durationMillis,
+                    easing = AppMotionEasing.Continuity
+                )
+            )
+        }
+        onEntryMotionFinished(entryMotionKey)
+    }
+    val entryMotionModifier = if (entryMotionSpec != null) {
+        Modifier.graphicsLayer {
+            val progress = entryMotionProgress.value
+            val spec = entryMotionSpec
+            alpha = lerp(spec.initialAlpha, 1f, progress)
+            scaleX = lerp(spec.initialScale, 1f, progress)
+            scaleY = lerp(spec.initialScale, 1f, progress)
+            translationY = with(density) {
+                spec.initialTranslationYDp.dp.toPx()
+            } * (1f - progress)
+            transformOrigin = TransformOrigin(
+                spec.transformOriginPivotX,
+                spec.transformOriginPivotY
+            )
+        }
+    } else {
+        Modifier
+    }
 
     Surface(
-        modifier = modifier.fillMaxWidth(),
+        modifier = modifier
+            .fillMaxWidth()
+            .then(entryMotionModifier),
         color = Color.Transparent,
         shadowElevation = 0.dp
     ) {
@@ -1463,7 +1630,7 @@ fun SearchTopBar(
                                 MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.6f)
                             }
                         )
-                        .padding(horizontal = 12.dp),
+                        .padding(horizontal = chromeSpec.inputHorizontalPaddingDp.dp),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     BasicTextField(
@@ -1506,12 +1673,12 @@ fun SearchTopBar(
                     )
                 }
 
-                Spacer(modifier = Modifier.width(8.dp))
+                Spacer(modifier = Modifier.width(chromeSpec.horizontalGapDp.dp))
 
                 IconButton(
                     onClick = onClearQuery,
                     enabled = query.isNotEmpty(),
-                    modifier = Modifier.size(40.dp)
+                    modifier = Modifier.size(chromeSpec.clearActionSizeDp.dp)
                 ) {
                     Icon(
                         clearIcon,
@@ -1520,7 +1687,8 @@ fun SearchTopBar(
                             MaterialTheme.colorScheme.onSurfaceVariant
                         } else {
                             MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.35f)
-                        }
+                        },
+                        modifier = Modifier.size(chromeSpec.actionIconSizeDp.dp)
                     )
                 }
 
@@ -1528,7 +1696,7 @@ fun SearchTopBar(
                     onClick = { onSearch(resolvedSubmitKeyword) },
                     enabled = canSubmit,
                     modifier = Modifier
-                        .size(42.dp)
+                        .size(chromeSpec.submitActionSizeDp.dp)
                         .clip(RoundedCornerShape(chromeSpec.actionContainerCornerRadiusDp.dp))
                         .background(
                             if (canSubmit) {
@@ -1545,7 +1713,8 @@ fun SearchTopBar(
                             searchIconColor
                         } else {
                             MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.35f)
-                        }
+                        },
+                        modifier = Modifier.size(chromeSpec.actionIconSizeDp.dp)
                     )
                 }
             }
@@ -1577,13 +1746,13 @@ fun HistoryChip(
         } else {
             MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.7f)
         },
-        shape = RoundedCornerShape(chromeSpec.actionContainerCornerRadiusDp.dp),
+        shape = RoundedCornerShape(chromeSpec.chipCornerRadiusDp.dp),
         tonalElevation = 0.dp
     ) {
         Row(
             modifier = Modifier
-                .height(36.dp)
-                .padding(start = 12.dp, end = 4.dp),
+                .height(chromeSpec.chipHeightDp.dp)
+                .padding(start = chromeSpec.chipHorizontalPaddingDp.dp, end = 4.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
             Icon(
@@ -1910,7 +2079,7 @@ fun SearchHistorySection(
 fun SearchFilterBar(
     currentType: SearchType,
     currentOrder: SearchOrder,
-    currentDuration: SearchDuration,
+    currentDurations: Set<SearchDuration>,
     currentVideoTid: Int,
     currentUpOrder: SearchUpOrder,
     currentUpOrderSort: SearchOrderSort,
@@ -1918,7 +2087,7 @@ fun SearchFilterBar(
     currentLiveOrder: SearchLiveOrder,
     onTypeChange: (SearchType) -> Unit,
     onOrderChange: (SearchOrder) -> Unit,
-    onDurationChange: (SearchDuration) -> Unit,
+    onDurationToggle: (SearchDuration) -> Unit,
     onVideoTidChange: (Int) -> Unit,
     onUpOrderChange: (SearchUpOrder) -> Unit,
     onUpOrderSortChange: (SearchOrderSort) -> Unit,
@@ -1932,6 +2101,10 @@ fun SearchFilterBar(
     var showUpOrderSortMenu by remember { mutableStateOf(false) }
     var showUpUserTypeMenu by remember { mutableStateOf(false) }
     var showLiveOrderMenu by remember { mutableStateOf(false) }
+    val configuration = LocalConfiguration.current
+    val typeTabLayoutSpec = remember(configuration.screenWidthDp) {
+        resolveSearchTypeTabLayoutSpec(configuration.screenWidthDp)
+    }
 
     val videoTidOptions = remember {
         listOf(
@@ -1962,8 +2135,8 @@ fun SearchFilterBar(
         //  搜索类型切换 Tab
         FlowRow(
             modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
-            verticalArrangement = Arrangement.spacedBy(8.dp)
+            horizontalArrangement = Arrangement.spacedBy(typeTabLayoutSpec.horizontalSpacingDp.dp),
+            verticalArrangement = Arrangement.spacedBy(typeTabLayoutSpec.verticalSpacingDp.dp)
         ) {
             resolveSearchFilterTabs().forEach { type ->
                 val isSelected = currentType == type
@@ -1974,17 +2147,17 @@ fun SearchFilterBar(
                 Surface(
                     onClick = { onTypeChange(type) },
                     color = chipColors.backgroundColor,
-                    shape = RoundedCornerShape(18.dp)
+                    shape = RoundedCornerShape(typeTabLayoutSpec.minHeightDp.dp / 2)
                 ) {
                     Box(
                         modifier = Modifier
-                            .heightIn(min = 40.dp)
-                            .padding(horizontal = 16.dp),
+                            .heightIn(min = typeTabLayoutSpec.minHeightDp.dp)
+                            .padding(horizontal = typeTabLayoutSpec.horizontalPaddingDp.dp),
                         contentAlignment = Alignment.Center
                     ) {
                         Text(
                             text = type.displayName,
-                            fontSize = 14.sp,
+                            fontSize = typeTabLayoutSpec.fontSizeSp.sp,
                             color = chipColors.textColor,
                             fontWeight = if (isSelected) FontWeight.SemiBold else FontWeight.Normal,
                             maxLines = 1
@@ -2027,8 +2200,8 @@ fun SearchFilterBar(
                 if (SearchFilterControl.VIDEO_DURATION in filterControls) {
                 Box {
                     FilterMenuChip(
-                        text = currentDuration.displayName,
-                        highlighted = currentDuration != SearchDuration.ALL,
+                        text = resolveSearchDurationFilterLabel(currentDurations),
+                        highlighted = currentDurations.isNotEmpty(),
                         onClick = { showDurationMenu = true }
                     )
                     DropdownMenu(
@@ -2036,11 +2209,21 @@ fun SearchFilterBar(
                         onDismissRequest = { showDurationMenu = false }
                     ) {
                         SearchDuration.entries.forEach { duration ->
+                            val selected = if (duration == SearchDuration.ALL) {
+                                currentDurations.isEmpty()
+                            } else {
+                                duration in currentDurations
+                            }
                             DropdownMenuItem(
                                 text = { Text(duration.displayName) },
+                                leadingIcon = {
+                                    Checkbox(
+                                        checked = selected,
+                                        onCheckedChange = null
+                                    )
+                                },
                                 onClick = {
-                                    onDurationChange(duration)
-                                    showDurationMenu = false
+                                    onDurationToggle(duration)
                                 }
                             )
                         }
@@ -2179,6 +2362,10 @@ private fun FilterMenuChip(
     onClick: () -> Unit
 ) {
     val uiPreset = LocalUiPreset.current
+    val androidNativeVariant = LocalAndroidNativeVariant.current
+    val chromeSpec = remember(uiPreset, androidNativeVariant) {
+        resolveSearchChromeVisualSpec(uiPreset, androidNativeVariant)
+    }
     val chevronIcon = rememberAppChevronDownIcon()
     Surface(
         onClick = onClick,
@@ -2191,10 +2378,12 @@ private fun FilterMenuChip(
                 MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.6f)
             }
         },
-        shape = RoundedCornerShape(if (uiPreset == UiPreset.MD3) 14.dp else 8.dp)
+        shape = RoundedCornerShape(chromeSpec.chipCornerRadiusDp.dp)
     ) {
         Row(
-            modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
+            modifier = Modifier
+                .height(chromeSpec.chipHeightDp.dp)
+                .padding(horizontal = chromeSpec.chipHorizontalPaddingDp.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
             Text(
@@ -2448,7 +2637,7 @@ internal fun UpSearchResultCard(
             val avatarModifier = if (sharedTransitionScope != null && animatedVisibilityScope != null) {
                 with(sharedTransitionScope) {
                     Modifier.sharedBounds(
-                        rememberSharedContentState(key = "up_avatar_${cleanedItem.mid}"),
+                        rememberSharedContentState(key = com.android.purebilibili.core.ui.transition.avatarSharedElementKey(cleanedItem.mid)),
                         animatedVisibilityScope = animatedVisibilityScope,
                         clipInOverlayDuringTransition = OverlayClip(CircleShape)
                     )
@@ -2484,27 +2673,19 @@ internal fun UpSearchResultCard(
                         overflow = TextOverflow.Ellipsis
                     )
                     
-                    // 认证标志
-                    cleanedItem.official_verify?.let { verify ->
-                        when (resolveSearchVerifyBadge(verify.type, verify.desc)) {
-                            SearchVerifyBadge.NONE -> Unit
-                            SearchVerifyBadge.PERSONAL,
-                            SearchVerifyBadge.ORGANIZATION -> {
-                                val isPersonal = resolveSearchVerifyBadge(verify.type, verify.desc) == SearchVerifyBadge.PERSONAL
-                                Spacer(modifier = Modifier.width(4.dp))
-                                Surface(
-                                    color = if (isPersonal) Color(0xFFFFB300) else Color(0xFF2196F3),
-                                    shape = RoundedCornerShape(4.dp)
-                                ) {
-                                    Text(
-                                        text = if (isPersonal) "个人" else "机构",
-                                        fontSize = 10.sp,
-                                        color = Color.White,
-                                        modifier = Modifier.padding(horizontal = 4.dp, vertical = 1.dp)
-                                    )
-                                }
-                            }
-                        }
+                    val verifyBadge = cleanedItem.official_verify?.let { verify ->
+                        resolveOfficialVerifyBadge(
+                            type = verify.type,
+                            desc = verify.desc,
+                            compact = true
+                        )
+                    }
+                    if (verifyBadge != null) {
+                        Spacer(modifier = Modifier.width(4.dp))
+                        OfficialVerifyBadge(
+                            badge = verifyBadge,
+                            compact = true
+                        )
                     }
                 }
                 

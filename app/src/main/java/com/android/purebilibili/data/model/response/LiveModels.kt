@@ -30,6 +30,54 @@ data class LiveData(
 }
 
 @Serializable
+data class LiveRecommendResponse(
+    val code: Int = 0,
+    val message: String = "",
+    val data: LiveRecommendData? = null
+)
+
+@Serializable
+data class LiveRecommendData(
+    @SerialName("recommend_room_list") val recommendRoomList: List<LiveRecommendRoom>? = null,
+    @SerialName("top_room_id") val topRoomId: Long = 0
+)
+
+@Serializable
+data class LiveRecommendRoom(
+    @SerialName("roomid") val roomId: Long = 0,
+    val uid: Long = 0,
+    val title: String = "",
+    val uname: String = "",
+    val face: String = "",
+    val cover: String = "",
+    val keyframe: String = "",
+    val online: Int = 0,
+    @SerialName("area_v2_name") val areaName: String = "",
+    @SerialName("area_v2_parent_name") val parentName: String = "",
+    @SerialName("watched_show") val watchedShow: WatchedShow? = null,
+    @SerialName("is_ad") val isAd: Boolean = false,
+    @SerialName("show_callback") val showCallback: String = "",
+    @SerialName("click_callback") val clickCallback: String = "",
+    @SerialName("session_id") val sessionId: String = ""
+) {
+    fun toLiveRoom(): LiveRoom {
+        return LiveRoom(
+            roomid = roomId,
+            uid = uid,
+            title = title,
+            uname = uname,
+            face = face,
+            cover = cover,
+            online = online,
+            watchedShow = watchedShow,
+            areaName = areaName,
+            parentName = parentName,
+            keyframe = keyframe
+        )
+    }
+}
+
+@Serializable
 @OptIn(ExperimentalSerializationApi::class)
 data class LiveRoom(
     @JsonNames("roomid", "room_id")
@@ -43,6 +91,7 @@ data class LiveRoom(
     @SerialName("system_cover") val systemCover: String = "",
     @SerialName("show_cover") val showCover: String = "",
     val online: Int = 0,
+    @SerialName("watched_show") val watchedShow: WatchedShow? = null,
     @JsonNames("area_name", "area_v2_name")
     @SerialName("area_name")
     val areaName: String = "",
@@ -55,6 +104,15 @@ data class LiveRoom(
         return listOf(cover, userCover, showCover, systemCover, keyframe, face)
             .firstOrNull { it.isNotBlank() }
             .orEmpty()
+    }
+
+    fun viewerCount(): Int {
+        val watchedCount = watchedShow?.viewerCount() ?: 0
+        return when {
+            watchedCount > 0 -> watchedCount
+            online > 0 -> online
+            else -> 0
+        }
     }
 }
 
@@ -172,9 +230,33 @@ data class WatchedShow(
     val num: Int = 0,
     @SerialName("text_small") val textSmall: String = "",
     @SerialName("text_large") val textLarge: String = ""
-)
+) {
+    fun viewerCount(): Int {
+        return when {
+            num > 0 -> num
+            else -> parseLiveViewerCountText(textSmall)
+                .takeIf { it > 0 }
+                ?: parseLiveViewerCountText(textLarge)
+        }
+    }
+}
+
+private fun parseLiveViewerCountText(text: String): Int {
+    val normalized = text.trim()
+    if (normalized.isEmpty()) return 0
+    val numberText = Regex("""\d+(?:\.\d+)?""").find(normalized)?.value ?: return 0
+    val multiplier = when {
+        normalized.contains("亿") -> 100_000_000f
+        normalized.contains("万") -> 10_000f
+        else -> 1f
+    }
+    return (numberText.toFloatOrNull() ?: 0f)
+        .times(multiplier)
+        .toInt()
+}
 
 @Serializable
+@OptIn(ExperimentalSerializationApi::class)
 data class FollowedLiveRoom(
     val roomid: Long = 0,
     val uid: Long = 0,
@@ -188,7 +270,10 @@ data class FollowedLiveRoom(
     val online: Int = 0,
     val popularity: Int = 0,
     val attention: Long = 0,
+    @SerialName("text_small") val textSmall: String = "",
+    @SerialName("text_large") val textLarge: String = "",
     @SerialName("watched_show") val watchedShow: WatchedShow? = null,
+    @JsonNames("area_name", "area_name_v2")
     @SerialName("area_name") val areaName: String = "",
     @SerialName("live_status") val liveStatus: Int = 0,
     @SerialName("live_time") val liveTime: Long = 0
@@ -196,16 +281,21 @@ data class FollowedLiveRoom(
     fun toLiveRoom(): LiveRoom {
         val validCover = listOf(cover, roomCover, userCover, systemCover, face)
             .firstOrNull { it.isNotEmpty() } ?: ""
+        val watchedCount = watchedShow?.viewerCount() ?: 0
+        val topLevelTextCount = parseLiveViewerCountText(textSmall)
+            .takeIf { it > 0 }
+            ?: parseLiveViewerCountText(textLarge)
         val validOnline = when {
+            watchedCount > 0 -> watchedCount
+            topLevelTextCount > 0 -> topLevelTextCount
             popularity > 0 -> popularity
-            attention > 0 -> attention.toInt()
-            watchedShow?.num != null && watchedShow.num > 0 -> watchedShow.num
+            online > 0 -> online
             else -> online
         }
         return LiveRoom(
             roomid = roomid, uid = uid, title = title, uname = uname, face = face,
             cover = validCover, userCover = userCover.ifEmpty { validCover },
-            online = validOnline, areaName = areaName, keyframe = validCover
+            online = validOnline, watchedShow = watchedShow, areaName = areaName, keyframe = validCover
         )
     }
 }

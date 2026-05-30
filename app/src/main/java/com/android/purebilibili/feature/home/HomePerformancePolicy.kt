@@ -14,7 +14,7 @@ internal data class HomePerformanceConfig(
     val preloadAheadCount: Int
 ) {
     val isAnyLiquidGlassEnabled: Boolean
-        get() = topBarLiquidGlassEnabled || bottomBarLiquidGlassEnabled
+        get() = bottomBarLiquidGlassEnabled
 }
 
 internal fun resolveHomePreloadAheadCount(
@@ -22,7 +22,29 @@ internal fun resolveHomePreloadAheadCount(
     normalPreloadAheadCount: Int
 ): Int {
     if (isDataSaverActive) return 0
-    return normalPreloadAheadCount.coerceAtLeast(0).coerceAtMost(3)
+    return normalPreloadAheadCount.coerceAtLeast(0).coerceAtMost(2)
+}
+
+internal fun resolveHomeCoverPreloadRange(
+    isDataSaverActive: Boolean,
+    isScrollInProgress: Boolean,
+    lastVisibleIndex: Int,
+    totalItemCount: Int,
+    preloadAheadCount: Int
+): IntRange? {
+    if (isDataSaverActive || isScrollInProgress || totalItemCount <= 0) return null
+    val effectiveAheadCount = resolveHomePreloadAheadCount(
+        isDataSaverActive = false,
+        normalPreloadAheadCount = preloadAheadCount
+    )
+    if (effectiveAheadCount <= 0) return null
+
+    val preloadStart = (lastVisibleIndex + 1)
+        .coerceAtLeast(0)
+        .coerceAtMost(totalItemCount)
+    val preloadEndExclusive = (preloadStart + effectiveAheadCount).coerceAtMost(totalItemCount)
+    if (preloadStart >= preloadEndExclusive) return null
+    return preloadStart until preloadEndExclusive
 }
 
 internal fun resolveHomePerformanceConfig(
@@ -41,11 +63,6 @@ internal fun resolveHomePerformanceConfig(
     // Feature retired: keep parameter for compatibility, but never apply runtime smoothness downgrade.
     val shouldPrioritizeSmoothness = false
     val effectiveDataSaver = isDataSaverActive
-    val effectiveTopBarLiquidGlass = resolveEffectiveLiquidGlassEnabled(
-        requestedEnabled = topBarLiquidGlassEnabled,
-        uiPreset = uiPreset,
-        androidNativeLiquidGlassEnabled = androidNativeLiquidGlassEnabled
-    ) && !shouldPrioritizeSmoothness
     val effectiveBottomBarLiquidGlass = resolveEffectiveLiquidGlassEnabled(
         requestedEnabled = bottomBarLiquidGlassEnabled,
         uiPreset = uiPreset,
@@ -62,7 +79,7 @@ internal fun resolveHomePerformanceConfig(
     return HomePerformanceConfig(
         headerBlurEnabled = headerBlurEnabled,
         bottomBarBlurEnabled = bottomBarBlurEnabled,
-        topBarLiquidGlassEnabled = effectiveTopBarLiquidGlass,
+        topBarLiquidGlassEnabled = false,
         bottomBarLiquidGlassEnabled = effectiveBottomBarLiquidGlass,
         cardAnimationEnabled = cardAnimationEnabled,
         cardTransitionEnabled = cardTransitionEnabled,

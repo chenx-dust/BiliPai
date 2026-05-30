@@ -3,8 +3,10 @@ package com.android.purebilibili.feature.video.viewmodel
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.android.purebilibili.data.model.CommentFraudStatus
+import com.android.purebilibili.data.model.response.ReplyData
 import com.android.purebilibili.data.model.response.ReplyItem
 import com.android.purebilibili.data.repository.CommentRepository
+import com.android.purebilibili.data.repository.shouldStartCommentFraudDetection
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asSharedFlow
@@ -26,6 +28,8 @@ enum class CommentSortMode(val apiMode: Int, val label: String) {
         fun fromApiMode(mode: Int): CommentSortMode = entries.find { it.apiMode == mode } ?: HOT
     }
 }
+
+private const val SUB_REPLY_PAGE_SIZE = 20
 
 // 评论状态
 data class CommentUiState(
@@ -69,6 +73,7 @@ data class SubReplyUiState(
     val rootReply: ReplyItem? = null,
     val items: List<ReplyItem> = emptyList(),
     val baseItems: List<ReplyItem> = emptyList(),
+    val totalCount: Int = 0,
     val isLoading: Boolean = false,
     val page: Int = 1,
     val basePage: Int = 1,
@@ -79,9 +84,68 @@ data class SubReplyUiState(
     val grpcNextOffset: String? = null,
     val baseGrpcNextOffset: String? = null,
     val conversationAnchor: ReplyItem? = null,
+    val targetReplyId: Long = 0,
     // [新增] 消散动画状态
     val dissolvingIds: Set<Long> = emptySet()
 )
+
+internal fun resolveSubReplyLoadedTotalCount(
+    rootReply: ReplyItem?,
+    loadedReplyCount: Int,
+    remoteReplyCount: Int
+): Int {
+    if (remoteReplyCount > 0) {
+        return maxOf(remoteReplyCount, loadedReplyCount).coerceAtLeast(0)
+    }
+
+    val rootDeclaredCount = maxOf(
+        rootReply?.count ?: 0,
+        rootReply?.rcount ?: 0,
+        rootReply?.replies.orEmpty().size
+    )
+    return maxOf(rootDeclaredCount, loadedReplyCount).coerceAtLeast(0)
+}
+
+internal fun resolveSubReplyRemoteTotalCount(data: ReplyData): Int {
+    // x/v2/reply/reply 文档中 data.page.count 才是二级评论数；
+    // root.count 可能大于实际二级回复数，只能作为无 page/cursor 时的兜底。
+    return listOf(
+        data.page.count,
+        data.root?.rcount ?: 0,
+        data.cursor.allCount,
+        data.root?.count ?: 0,
+        data.page.acount
+    ).firstOrNull { it > 0 } ?: 0
+}
+
+internal fun resolveSubReplyPageEnd(
+    cursorIsEnd: Boolean,
+    fetchedReplyCount: Int,
+    loadedReplyCount: Int,
+    remoteReplyCount: Int
+): Boolean {
+    if (remoteReplyCount > loadedReplyCount.coerceAtLeast(0)) {
+        return false
+    }
+    return cursorIsEnd || fetchedReplyCount <= 0
+}
+
+internal fun resolveRoutedCommentRootReply(
+    loadedReplies: List<ReplyItem>,
+    remoteData: ReplyData?,
+    rootReplyId: Long
+): ReplyItem? {
+    if (rootReplyId <= 0L) return null
+    return loadedReplies.firstOrNull { it.rpid == rootReplyId }
+        ?: remoteData?.root?.takeIf { it.rpid == rootReplyId }
+}
+
+internal fun shouldStartRoutedSubReplyOpen(
+    rootReplyId: Long,
+    currentAid: Long
+): Boolean {
+    return rootReplyId > 0L && currentAid > 0L
+}
 
 class VideoCommentViewModel : ViewModel() {
     private val _commentState = MutableStateFlow(CommentUiState())
@@ -284,10 +348,16 @@ class VideoCommentViewModel : ViewModel() {
 
     // --- 二级评论逻辑 ---
 
-    fun openSubReply(rootReply: ReplyItem) {
+    fun openSubReply(rootReply: ReplyItem, targetReplyId: Long = 0L) {
         _subReplyState.value = SubReplyUiState(
             visible = true,
             rootReply = rootReply,
+            targetReplyId = targetReplyId.takeIf { it != rootReply.rpid } ?: 0L,
+            totalCount = resolveSubReplyLoadedTotalCount(
+                rootReply = rootReply,
+                loadedReplyCount = rootReply.replies.orEmpty().size,
+                remoteReplyCount = 0
+            ),
             isLoading = true,
             page = 1,
             upMid = _commentState.value.upMid  // [修复] 使用正确的 UP 主 mid
@@ -295,11 +365,97 @@ class VideoCommentViewModel : ViewModel() {
         loadSubReplies(rootReply.oid, rootReply.rpid, 1)
     }
 
+    fun openSubReplyFromRoute(rootReplyId: Long, targetReplyId: Long = 0L): Boolean {
+        if (!shouldStartRoutedSubReplyOpen(rootReplyId, currentAid)) return false
+
+        resolveRoutedCommentRootReply(
+            loadedReplies = allReplies.ifEmpty { _commentState.value.replies },
+            remoteData = null,
+            rootReplyId = rootReplyId
+        )?.let { rootReply ->
+            openSubReply(rootReply, targetReplyId)
+            return true
+        }
+
+        val routeAid = currentAid
+        _subReplyState.value = _subReplyState.value.copy(
+            visible = false,
+            isLoading = true,
+            error = null,
+            targetReplyId = targetReplyId.takeIf { it != rootReplyId } ?: 0L
+        )
+
+        viewModelScope.launch {
+            CommentRepository.getSubCommentsForSubject(
+                oid = routeAid,
+                type = 1,
+                rootId = rootReplyId,
+                page = 1,
+                ps = SUB_REPLY_PAGE_SIZE,
+                preferRestPaging = true
+            ).onSuccess { data ->
+                val rootReply = resolveRoutedCommentRootReply(
+                    loadedReplies = emptyList(),
+                    remoteData = data,
+                    rootReplyId = rootReplyId
+                )
+                if (rootReply == null) {
+                    _subReplyState.value = _subReplyState.value.copy(
+                        isLoading = false,
+                        error = "回复可能已被删除或不可见"
+                    )
+                    return@onSuccess
+                }
+
+                val items = data.replies.orEmpty()
+                val remoteTotalCount = resolveSubReplyRemoteTotalCount(data)
+                val totalCount = resolveSubReplyLoadedTotalCount(
+                    rootReply = rootReply,
+                    loadedReplyCount = items.size,
+                    remoteReplyCount = remoteTotalCount
+                )
+                val isEnd = resolveSubReplyPageEnd(
+                    cursorIsEnd = data.cursor.isEnd,
+                    fetchedReplyCount = items.size,
+                    loadedReplyCount = items.size,
+                    remoteReplyCount = remoteTotalCount
+                )
+                val nextOffset = data.grpcNextOffset.takeIf { it.isNotBlank() }
+                _subReplyState.value = SubReplyUiState(
+                    visible = true,
+                    rootReply = rootReply,
+                    items = items,
+                    baseItems = items,
+                    totalCount = totalCount,
+                    isLoading = false,
+                    page = 1,
+                    basePage = 1,
+                    isEnd = isEnd,
+                    baseIsEnd = isEnd,
+                    upMid = _commentState.value.upMid,
+                    grpcNextOffset = nextOffset,
+                    baseGrpcNextOffset = nextOffset,
+                    targetReplyId = targetReplyId.takeIf { it != rootReplyId } ?: 0L
+                )
+            }.onFailure { error ->
+                _subReplyState.value = _subReplyState.value.copy(
+                    isLoading = false,
+                    error = error.message ?: "回复加载失败"
+                )
+            }
+        }
+        return true
+    }
+
     fun closeSubReply() {
         _subReplyState.value = _subReplyState.value.copy(visible = false)
     }
 
-    fun onExternalCommentSent(aid: Long, newReply: ReplyItem?) {
+    fun onExternalCommentSent(
+        aid: Long,
+        newReply: ReplyItem?,
+        fraudDetectionEnabled: Boolean = true
+    ) {
         if (currentAid != aid || aid <= 0L) return
 
         val current = _commentState.value
@@ -320,6 +476,19 @@ class VideoCommentViewModel : ViewModel() {
                 reloadCommentsFromStart()
             }
             return
+        }
+
+        if (shouldStartCommentFraudDetection(fraudDetectionEnabled, newReply.rpid)) {
+            val sentAtSeconds = newReply.ctime
+                .takeIf { it > 0L }
+                ?: (System.currentTimeMillis() / 1000L)
+            launchFraudDetection(
+                aid = aid,
+                rpid = newReply.rpid,
+                rootId = newReply.root,
+                hasPictures = !newReply.content.pictures.isNullOrEmpty(),
+                sentAtSeconds = sentAtSeconds
+            )
         }
 
         val updatedAllReplies = when {
@@ -352,8 +521,14 @@ class VideoCommentViewModel : ViewModel() {
         )
 
         if (subState.visible && activeRootReply != null && newReply.root == activeRootReply.rpid) {
+            val updatedItems = (listOf(newReply) + subState.items).distinctBy { it.rpid }
             _subReplyState.value = subState.copy(
-                items = (listOf(newReply) + subState.items).distinctBy { it.rpid }
+                items = updatedItems,
+                totalCount = resolveSubReplyLoadedTotalCount(
+                    rootReply = activeRootReply,
+                    loadedReplyCount = updatedItems.size,
+                    remoteReplyCount = subState.totalCount + 1
+                )
             )
         }
     }
@@ -416,18 +591,32 @@ class VideoCommentViewModel : ViewModel() {
                 type = 1,
                 rootId = rootId,
                 page = page,
-                paginationOffset = _subReplyState.value.grpcNextOffset
+                ps = SUB_REPLY_PAGE_SIZE,
+                paginationOffset = _subReplyState.value.grpcNextOffset,
+                preferRestPaging = true
             )
             result.onSuccess { data ->
                 val current = _subReplyState.value
                 val newItems = data.replies ?: emptyList()
-                val isEnd = data.cursor.isEnd || newItems.isEmpty()
                 val updatedItems = if (page == 1) newItems else (current.items + newItems).distinctBy { it.rpid }
                 val nextOffset = data.grpcNextOffset.takeIf { it.isNotBlank() }
+                val remoteTotalCount = resolveSubReplyRemoteTotalCount(data)
+                val totalCount = resolveSubReplyLoadedTotalCount(
+                    rootReply = current.rootReply,
+                    loadedReplyCount = updatedItems.size,
+                    remoteReplyCount = remoteTotalCount
+                )
+                val isEnd = resolveSubReplyPageEnd(
+                    cursorIsEnd = data.cursor.isEnd,
+                    fetchedReplyCount = newItems.size,
+                    loadedReplyCount = updatedItems.size,
+                    remoteReplyCount = remoteTotalCount
+                )
 
                 _subReplyState.value = current.copy(
                     items = updatedItems,
                     baseItems = updatedItems,
+                    totalCount = totalCount,
                     isLoading = false,
                     page = page,
                     basePage = page,
@@ -530,7 +719,10 @@ class VideoCommentViewModel : ViewModel() {
     
     // --- [新增] 评论交互逻辑 ---
     
-    fun sendComment(message: String) {
+    fun sendComment(
+        message: String,
+        fraudDetectionEnabled: Boolean = true
+    ) {
         if (message.isBlank()) return
         val currentState = _commentState.value
         if (currentState.isSending) return
@@ -562,8 +754,16 @@ class VideoCommentViewModel : ViewModel() {
 
                 // [新增] 启动评论反诈检测（后台协程，不阻塞 UI）
                 val rpidToCheck = newReply?.rpid ?: 0L
-                if (rpidToCheck > 0) {
-                    launchFraudDetection(currentAid, rpidToCheck, root)
+                if (shouldStartCommentFraudDetection(fraudDetectionEnabled, rpidToCheck)) {
+                    val sentAtSeconds = newReply?.ctime
+                        ?.takeIf { it > 0L }
+                        ?: (System.currentTimeMillis() / 1000L)
+                    launchFraudDetection(
+                        aid = currentAid,
+                        rpid = rpidToCheck,
+                        rootId = root,
+                        sentAtSeconds = sentAtSeconds
+                    )
                 }
                 
                 // 1. 如果是主层级评论 (root=0)
@@ -707,7 +907,13 @@ class VideoCommentViewModel : ViewModel() {
     /**
      * 启动评论反诈后台检测
      */
-    private fun launchFraudDetection(aid: Long, rpid: Long, rootId: Long) {
+    private fun launchFraudDetection(
+        aid: Long,
+        rpid: Long,
+        rootId: Long,
+        hasPictures: Boolean = false,
+        sentAtSeconds: Long = 0
+    ) {
         _commentState.value = _commentState.value.copy(
             isDetectingFraud = true,
             fraudDetectResult = null,
@@ -717,7 +923,9 @@ class VideoCommentViewModel : ViewModel() {
             val result = CommentRepository.checkCommentStatus(
                 aid = aid,
                 rpid = rpid,
-                rootId = rootId
+                rootId = rootId,
+                hasPictures = hasPictures,
+                sentAtSeconds = sentAtSeconds
             )
             result.onSuccess { status ->
                 android.util.Log.d("CommentVM", "评论反诈检测结果: $status (rpid=$rpid)")

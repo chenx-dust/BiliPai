@@ -10,6 +10,7 @@
 | 场景 | 推荐方式 |
 | --- | --- |
 | 只想过滤推荐流、屏蔽关键词或处理弹幕 | 使用 [JSON / `.bp` 规则插件](../../docs/PLUGIN_DEVELOPMENT.md) |
+| 只想做首页顶部、搜索框、底栏饰面等 UI 美化 | 使用数据型 `.bpskin` 皮肤包 |
 | 需要写 Kotlin 排序逻辑、推荐算法、播放器或弹幕扩展 | 使用本 SDK 打包 `.bpplugin` |
 | 需要完整 UI、深度接入宿主生命周期或立即运行 | 暂时使用源码级原生插件，参考 [原生插件开发](../../docs/NATIVE_PLUGIN_DEVELOPMENT.md) |
 
@@ -20,7 +21,7 @@
 3. 选择要实现的接口，例如 `RecommendationPluginApi`。
 4. 在插件类里声明 `PluginCapabilityManifest` 和所需能力。
 5. 在包根目录放置 `plugin-manifest.json`，字段与代码里的 manifest 保持一致。
-6. 编译插件模块，生成 `classes.jar` 或后续版本支持的载荷。
+6. 编译插件模块，生成 `classes.jar`、`classes.dex` 或后续版本支持的载荷。
 7. 将 `plugin-manifest.json`、可选签名文件、编译载荷打包为 `.bpplugin`。
 8. 在 BiliPai 插件中心选择 `.bpplugin`，检查预览、签名、能力和授权状态。
 
@@ -158,13 +159,15 @@ SDK 还定义了播放器和弹幕接口，供后续宿主执行能力开放时�
 
 当前外部 Dex 尚不执行，这些接口主要用于提前适配 API 和包格式。需要马上落地运行的播放器/弹幕能力，请先走源码级原生插件。
 
+> UI 美化请不要打包成 `.bpplugin`。首页顶部氛围、搜索框和底栏饰面走 `.bpskin` 资源包；`.bpskin` 不执行代码，也不能替换底栏液态玻璃、指示器或滑动色散链路。可参考 [`plugins/samples/winter-cloud-skin`](../samples/winter-cloud-skin) 打包一个可导入的冬日云朵皮肤；插件中心也可以直接选择单主题目录 ZIP 或内层 `_package.zip`，或用 [`plugins/tools/bilibili_skin_to_bpskin.py`](../tools/bilibili_skin_to_bpskin.py) 将本地 `KimmyXYC/bilibili-skin` 主题目录转换为仅本地使用的 `.bpskin`。
+
 ## `.bpplugin` 包格式
 
 `.bpplugin` 本质是 ZIP 文件。版本 1 要求：
 
 - `plugin-manifest.json` 位于 ZIP 根目录。
 - 可选 `plugin-signature.json` 位于 ZIP 根目录。
-- 可选编译载荷，例如 `classes.jar`。当前宿主只做预览和授权，不加载执行。
+- 可选编译载荷，例如 `classes.jar`、`classes.dex` 或其他资源文件。当前宿主只做预览和授权，不加载执行。
 
 BiliPai 会计算完整插件包 SHA-256。授权记录绑定 `pluginId + packageSha256`，所以只要包内容变化，用户就需要重新确认授权。
 
@@ -201,11 +204,16 @@ val packageBpPlugin by tasks.registering(Zip::class) {
 
 ## 示例
 
-参考 [`plugins/samples/today-watch-remix/`](../samples/today-watch-remix/)：它实现了一个最小推荐插件，并打包为可预览的 `.bpplugin`。
+参考以下示例：
+
+- [`plugins/samples/today-watch-remix/`](../samples/today-watch-remix/)：最小推荐插件，按点赞和播放量排序。
+- [`plugins/samples/watch-compass/`](../samples/watch-compass/)：观感罗盘样例，把推荐拆成“轻松起步 / 深挖正片 / 冷门宝藏”三类。
+
+示例目录没有独立 Gradle wrapper。请从示例目录调用仓库根 wrapper，并提供 Android SDK 路径：
 
 ```bash
 cd plugins/samples/today-watch-remix
-./gradlew packageBpPlugin
+ANDROID_HOME=/Users/yiyang/Library/Android/sdk ../../../gradlew -p . packageBpPlugin --no-daemon
 ```
 
 输出位置：
@@ -213,6 +221,8 @@ cd plugins/samples/today-watch-remix
 ```text
 build/distributions/today-watch-remix.bpplugin
 ```
+
+如果复制到仓库外独立开发，也可以在示例根目录创建 `local.properties` 并写入 `sdk.dir=/path/to/android/sdk`。
 
 ## 发布前检查清单
 

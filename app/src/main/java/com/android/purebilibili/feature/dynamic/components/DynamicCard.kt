@@ -33,6 +33,7 @@ import androidx.compose.ui.unit.sp
 import coil.ImageLoader
 import coil.compose.AsyncImage
 import kotlinx.coroutines.launch
+import com.android.purebilibili.core.store.SettingsManager
 import com.android.purebilibili.core.theme.AndroidNativeVariant
 import com.android.purebilibili.core.theme.LocalAndroidNativeVariant
 import com.android.purebilibili.core.theme.LocalUiPreset
@@ -42,12 +43,14 @@ import com.android.purebilibili.core.ui.rememberAppMoreIcon
 import com.android.purebilibili.core.ui.rememberAppVisibilityOffIcon
 import com.android.purebilibili.data.model.response.DynamicDesc
 import com.android.purebilibili.data.model.response.DynamicItem
+import com.android.purebilibili.data.model.response.DrawItem
 import com.android.purebilibili.feature.dynamic.resolveDynamicActionButtonSlotWeight
 import com.android.purebilibili.feature.dynamic.resolveDynamicActionButtonSpacing
 import com.android.purebilibili.feature.dynamic.resolveDynamicCardContentPadding
 import com.android.purebilibili.feature.dynamic.resolveDynamicCardOuterPadding
 import com.android.purebilibili.data.model.response.DynamicStatModule
 import com.android.purebilibili.data.model.response.DynamicType
+import com.android.purebilibili.data.model.response.OpusContentBlock
 import top.yukonga.miuix.kmp.theme.MiuixTheme
 
 /**
@@ -60,8 +63,10 @@ fun DynamicCardV2(
     onBangumiClick: (Long, Long) -> Unit = { _, _ -> },
     onUserClick: (Long) -> Unit,
     onLiveClick: (roomId: Long, title: String, uname: String) -> Unit = { _, _, _ -> },
+    onArticleClick: ((articleId: Long, title: String) -> Unit)? = null,
     onDynamicDetailClick: ((dynamicId: String) -> Unit)? = null,
     isDetail: Boolean = false,
+    onPrimaryClickOverride: ((DynamicItem) -> Unit)? = null,
     gifImageLoader: ImageLoader,
     //  [新增] 评论/转发/点赞回调
     onCommentClick: (dynamicId: String) -> Unit = {},
@@ -73,15 +78,37 @@ fun DynamicCardV2(
     val author = item.modules.module_author
     val content = item.modules.module_dynamic
     val stat = item.modules.module_stat
+    val context = LocalContext.current
+    val uriHandler = LocalUriHandler.current
+    val dynamicPreviewTextVisible by SettingsManager.getDynamicImagePreviewTextVisible(context)
+        .collectAsState(initial = true)
+    val authorTimeText = remember(author?.pub_time, author?.pub_ts) {
+        author?.let {
+            resolveDynamicAuthorTimeText(
+                pubTime = it.pub_time,
+                pubTs = it.pub_ts
+            )
+        }.orEmpty()
+    }
+    val contentHasImages = content?.major?.draw?.items?.isNotEmpty() == true ||
+        content?.major?.opus?.pics?.isNotEmpty() == true
+    val visibleDynamicDesc = content?.desc?.let { desc ->
+        resolveDynamicDescForImages(desc, hasImages = contentHasImages)
+    }
+    val fullOpusContentBlocks = content?.major?.opus?.let { opus ->
+        resolveDynamicOpusPresentationBlocks(opus = opus, isDetail = isDetail)
+    }.orEmpty()
+    val hasFullOpusDetailContent = fullOpusContentBlocks.isNotEmpty()
     val type = DynamicType.fromApiValue(item.type)
     val cardClickAction = remember(item) { resolveDynamicCardPrimaryAction(item) }
     val watchLaterAid = remember(item) { resolveDynamicWatchLaterAid(item) }
-    val isPrimaryClickEnabled = remember(cardClickAction, onDynamicDetailClick) {
-        when (cardClickAction) {
-            is DynamicCardPrimaryAction.OpenDynamicDetail -> onDynamicDetailClick != null
-            DynamicCardPrimaryAction.None -> false
-            else -> true
-        }
+    val isPrimaryClickEnabled = remember(cardClickAction, onArticleClick, onDynamicDetailClick, onPrimaryClickOverride) {
+        shouldEnableDynamicCardPrimaryClick(
+            action = cardClickAction,
+            hasArticleClick = onArticleClick != null,
+            hasDynamicDetailClick = onDynamicDetailClick != null,
+            hasPrimaryClickOverride = onPrimaryClickOverride != null
+        )
     }
 
     Column(
@@ -89,10 +116,13 @@ fun DynamicCardV2(
             .fillMaxWidth()
             .padding(horizontal = resolveDynamicCardOuterPadding())
             .clickable(enabled = isPrimaryClickEnabled) {
-                dispatchDynamicCardPrimaryAction(
+                dispatchDynamicCardPrimaryClick(
+                    item = item,
                     action = cardClickAction,
+                    onPrimaryClickOverride = onPrimaryClickOverride,
                     onVideoClick = onVideoClick,
                     onBangumiClick = onBangumiClick,
+                    onArticleClick = onArticleClick,
                     onDynamicDetailClick = onDynamicDetailClick,
                     onUserClick = onUserClick,
                     onLiveClick = onLiveClick
@@ -130,6 +160,7 @@ fun DynamicCardV2(
                                 action = DynamicCardPrimaryAction.OpenUser(author.mid),
                                 onVideoClick = onVideoClick,
                                 onBangumiClick = onBangumiClick,
+                                onArticleClick = onArticleClick,
                                 onDynamicDetailClick = onDynamicDetailClick,
                                 onUserClick = onUserClick,
                                 onLiveClick = onLiveClick
@@ -148,7 +179,7 @@ fun DynamicCardV2(
                         color = if (author.vip?.status == 1) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface
                     )
                     Text(
-                        author.pub_time,
+                        authorTimeText,
                         fontSize = 12.sp,
                         color = MaterialTheme.colorScheme.onSurfaceVariant.copy(0.6f)
                     )
@@ -232,8 +263,8 @@ fun DynamicCardV2(
         }
         
         //  动态内容文字（支持@高亮）
-        content?.desc?.let { desc ->
-            if (desc.text.isNotEmpty()) {
+        if (!hasFullOpusDetailContent) visibleDynamicDesc?.let { desc ->
+            if (shouldRenderDynamicRichText(desc)) {
                 RichTextContent(
                     desc = desc,
                     onUserClick = onUserClick
@@ -248,11 +279,12 @@ fun DynamicCardV2(
             VideoCardLarge(
                 archive = archive,
                 publishTs = author?.pub_ts ?: 0L,
+                cornerBadgeText = resolveDynamicArchiveBadgeLabel(archive),
                 onClick = {
                     playableBvid?.let(onVideoClick)
                         ?: onDynamicDetailClick?.invoke(item.id_str)
                 },
-                transitionName = "video-${archive.bvid}" // [新增] 共享元素过渡名称
+                sharedElementKey = com.android.purebilibili.core.ui.transition.videoPlayerSharedElementKey(archive.bvid)
             )
             Spacer(modifier = Modifier.height(12.dp))
         }
@@ -267,7 +299,9 @@ fun DynamicCardV2(
                     bangumiTarget?.let { onBangumiClick(it.seasonId, it.epId) }
                         ?: onDynamicDetailClick?.invoke(item.id_str)
                 },
-                transitionName = "video-${pgc.bvid.ifBlank { item.id_str }}"
+                sharedElementKey = com.android.purebilibili.core.ui.transition.videoPlayerSharedElementKey(
+                    pgc.bvid.ifBlank { item.id_str }
+                )
             )
             Spacer(modifier = Modifier.height(12.dp))
         }
@@ -276,10 +310,10 @@ fun DynamicCardV2(
         content?.major?.draw?.let { draw ->
             var selectedImageIndex by remember { mutableIntStateOf(-1) }
             var sourceRect by remember { mutableStateOf<androidx.compose.ui.geometry.Rect?>(null) }
-            val drawPreviewText = remember(author?.name, content.desc?.text) {
+            val drawPreviewText = remember(author?.name, visibleDynamicDesc?.text) {
                 ImagePreviewTextContent(
                     headline = author?.name.orEmpty(),
-                    body = content.desc?.text.orEmpty()
+                    body = visibleDynamicDesc?.text.orEmpty()
                 )
             }
             
@@ -304,6 +338,7 @@ fun DynamicCardV2(
                     initialIndex = selectedImageIndex,
                     sourceRect = sourceRect,  //  [新增] 传递源位置用于展开动画
                     textContent = drawPreviewText,
+                    defaultTextVisible = dynamicPreviewTextVisible,
                     onDismiss = { selectedImageIndex = -1 }
                 )
             }
@@ -313,9 +348,18 @@ fun DynamicCardV2(
         content?.major?.opus?.let { opus ->
             var selectedImageIndex by remember { mutableIntStateOf(-1) }
             var sourceRect by remember { mutableStateOf<androidx.compose.ui.geometry.Rect?>(null) }
-            val opusPreviewText = remember(author?.name, content.desc?.text, opus.summary?.text) {
-                val body = content.desc?.text.takeUnless { it.isNullOrBlank() }
-                    ?: opus.summary?.text.orEmpty()
+            val visibleOpusSummaryDesc = remember(opus.summary, opus.pics) {
+                opus.summary?.let { summary ->
+                    resolveDynamicOpusSummaryDescForImages(
+                        text = summary.text,
+                        richTextNodes = summary.rich_text_nodes,
+                        hasImages = opus.pics.isNotEmpty()
+                    )
+                }
+            }
+            val opusPreviewText = remember(author?.name, visibleDynamicDesc?.text, visibleOpusSummaryDesc?.text) {
+                val body = visibleDynamicDesc?.text.takeUnless { it.isNullOrBlank() }
+                    ?: visibleOpusSummaryDesc?.text.orEmpty()
                 ImagePreviewTextContent(
                     headline = author?.name.orEmpty(),
                     body = body
@@ -336,14 +380,11 @@ fun DynamicCardV2(
             }
             
             // 显示文字摘要 (如果有且 desc 为空)
-            if (content.desc?.text.isNullOrEmpty()) {
-                opus.summary?.let { summary ->
-                    if (summary.text.isNotEmpty()) {
+            if (!shouldRenderDynamicRichText(visibleDynamicDesc)) {
+                visibleOpusSummaryDesc?.let { summary ->
+                    if (shouldRenderDynamicRichText(summary)) {
                         RichTextContent(
-                            desc = DynamicDesc(
-                                text = summary.text,
-                                rich_text_nodes = summary.rich_text_nodes
-                            ),
+                            desc = summary,
                             onUserClick = onUserClick
                         )
                         Spacer(modifier = Modifier.height(12.dp))
@@ -352,9 +393,89 @@ fun DynamicCardV2(
             }
             
             // 显示图片 (转换为 DrawItem 格式复用现有组件)
-            if (opus.pics.isNotEmpty()) {
+            if (fullOpusContentBlocks.isNotEmpty()) {
+                val previewImages = remember(opus.pics) { opus.pics.map { it.url } }
+                var fullContentSelectedImageIndex by remember { mutableIntStateOf(-1) }
+                var fullContentImageIndex = 0
+                fullOpusContentBlocks.forEach { block ->
+                    when (block) {
+                        is OpusContentBlock.Text -> {
+                            Text(
+                                text = block.text,
+                                style = MaterialTheme.typography.bodyLarge,
+                                color = MaterialTheme.colorScheme.onSurface,
+                                modifier = Modifier.padding(bottom = 12.dp)
+                            )
+                        }
+                        is OpusContentBlock.Image -> {
+                            val currentImageIndex = fullContentImageIndex
+                            fullContentImageIndex += 1
+                            val aspectRatio = remember(block.pic.width, block.pic.height) {
+                                if (block.pic.width > 0 && block.pic.height > 0) {
+                                    block.pic.width.toFloat() / block.pic.height.toFloat()
+                                } else {
+                                    null
+                                }
+                            }
+                            AsyncImage(
+                                model = block.pic.url,
+                                contentDescription = opus.title.orEmpty(),
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .then(
+                                        if (aspectRatio != null) {
+                                            Modifier.aspectRatio(aspectRatio)
+                                        } else {
+                                            Modifier
+                                        }
+                                    )
+                                    .clip(RoundedCornerShape(12.dp))
+                                    .clickable(enabled = currentImageIndex in previewImages.indices) {
+                                        fullContentSelectedImageIndex = currentImageIndex
+                                    },
+                                contentScale = ContentScale.FillWidth
+                            )
+                            Spacer(modifier = Modifier.height(12.dp))
+                        }
+                        is OpusContentBlock.LinkCard -> {
+                            DynamicOpusLinkCard(
+                                card = block.card,
+                                modifier = Modifier.padding(bottom = 12.dp),
+                                onClick = {
+                                    when (val action = resolveDynamicOpusLinkCardAction(block.card)) {
+                                        is DynamicOpusLinkCardAction.OpenVideo -> onVideoClick(action.videoId)
+                                        is DynamicOpusLinkCardAction.OpenDynamicDetail -> onDynamicDetailClick?.invoke(action.dynamicId)
+                                        is DynamicOpusLinkCardAction.OpenArticle -> onArticleClick?.invoke(action.articleId, action.title)
+                                        is DynamicOpusLinkCardAction.OpenLive -> onLiveClick(
+                                            action.roomId,
+                                            block.card.title.ifBlank { "直播间" },
+                                            author?.name.orEmpty()
+                                        )
+                                        is DynamicOpusLinkCardAction.OpenUser -> onUserClick(action.mid)
+                                        is DynamicOpusLinkCardAction.OpenBangumi -> onBangumiClick(action.seasonId, action.epId)
+                                        is DynamicOpusLinkCardAction.OpenExternalUrl -> runCatching {
+                                            uriHandler.openUri(action.url)
+                                        }
+                                        DynamicOpusLinkCardAction.None -> Unit
+                                    }
+                                }
+                            )
+                        }
+                    }
+                }
+
+                if (fullContentSelectedImageIndex >= 0) {
+                    ImagePreviewDialog(
+                        images = previewImages,
+                        initialIndex = fullContentSelectedImageIndex,
+                        textContent = opusPreviewText,
+                        defaultTextVisible = dynamicPreviewTextVisible,
+                        onDismiss = { fullContentSelectedImageIndex = -1 }
+                    )
+                }
+            } else if (opus.pics.isNotEmpty()) {
                 val drawItems = opus.pics.map { pic ->
-                    com.android.purebilibili.data.model.response.DrawItem(
+                    DrawItem(
                         src = pic.url,
                         width = pic.width,
                         height = pic.height
@@ -363,7 +484,7 @@ fun DynamicCardV2(
                 DrawGridV2(
                     items = drawItems,
                     gifImageLoader = gifImageLoader,
-                    maxDisplayImages = if (isDetail) null else 9,
+                    maxDisplayImages = resolveDynamicOpusPreviewImageLimit(isDetail),
                     onImageClick = { index, rect ->
                         val action = resolveDynamicCardMediaAction(item, index)
                         if (action is DynamicCardMediaAction.PreviewImages) {
@@ -381,6 +502,54 @@ fun DynamicCardV2(
                         initialIndex = selectedImageIndex,
                         sourceRect = sourceRect,  //  [新增] 传递源位置用于展开动画
                         textContent = opusPreviewText,
+                        defaultTextVisible = dynamicPreviewTextVisible,
+                        onDismiss = { selectedImageIndex = -1 }
+                    )
+                }
+            }
+        }
+
+        content?.major?.article?.let { article ->
+            val articleCovers = remember(article.covers) { resolveArticleCoverUrls(article) }
+            if (articleCovers.isNotEmpty()) {
+                var selectedImageIndex by remember { mutableIntStateOf(-1) }
+                var sourceRect by remember { mutableStateOf<androidx.compose.ui.geometry.Rect?>(null) }
+                val articlePreviewText = remember(author?.name, visibleDynamicDesc?.text, article.title, article.desc) {
+                    val body = visibleDynamicDesc?.text
+                        .takeUnless { it.isNullOrBlank() }
+                        ?: article.desc.ifBlank { article.title }
+                    ImagePreviewTextContent(
+                        headline = author?.name.orEmpty(),
+                        body = body
+                    )
+                }
+                val drawItems = remember(article.covers) { resolveArticleCoverDrawItems(article) }
+                DrawGridV2(
+                    items = drawItems,
+                    gifImageLoader = gifImageLoader,
+                    maxDisplayImages = if (isDetail) null else 9,
+                    onImageClick = { index, rect ->
+                        when (val action = resolveDynamicCardMediaAction(item, index, isDetail = isDetail)) {
+                            is DynamicCardMediaAction.PreviewImages -> {
+                                selectedImageIndex = action.initialIndex
+                                sourceRect = rect
+                            }
+                            is DynamicCardMediaAction.OpenDynamicDetail -> {
+                                onDynamicDetailClick?.invoke(action.dynamicId)
+                            }
+                            DynamicCardMediaAction.None -> Unit
+                        }
+                    }
+                )
+                Spacer(modifier = Modifier.height(12.dp))
+
+                if (selectedImageIndex >= 0) {
+                    ImagePreviewDialog(
+                        images = articleCovers,
+                        initialIndex = selectedImageIndex,
+                        sourceRect = sourceRect,
+                        textContent = articlePreviewText,
+                        defaultTextVisible = dynamicPreviewTextVisible,
                         onDismiss = { selectedImageIndex = -1 }
                     )
                 }
@@ -401,7 +570,9 @@ fun DynamicCardV2(
                     },
                     isCollection = true,
                     collectionTitle = season.title,
-                    transitionName = "video-${seasonArchive.bvid}" // [新增] 共享元素过渡名称
+                    sharedElementKey = com.android.purebilibili.core.ui.transition.videoPlayerSharedElementKey(
+                        seasonArchive.bvid
+                    )
                 )
                 Spacer(modifier = Modifier.height(12.dp))
             } else {
@@ -423,6 +594,7 @@ fun DynamicCardV2(
                         action = DynamicCardPrimaryAction.OpenLive(roomId, title, uname),
                         onVideoClick = onVideoClick,
                         onBangumiClick = onBangumiClick,
+                        onArticleClick = onArticleClick,
                         onDynamicDetailClick = onDynamicDetailClick,
                         onUserClick = onUserClick,
                         onLiveClick = onLiveClick
@@ -439,7 +611,8 @@ fun DynamicCardV2(
                 onVideoClick = onVideoClick,
                 onBangumiClick = onBangumiClick,
                 onUserClick = onUserClick,
-                gifImageLoader = gifImageLoader
+                gifImageLoader = gifImageLoader,
+                defaultPreviewTextVisible = dynamicPreviewTextVisible
             )
             Spacer(modifier = Modifier.height(12.dp))
         }
@@ -458,6 +631,7 @@ fun DynamicCardV2(
                 icon = io.github.alexzhirkevich.cupertino.icons.CupertinoIcons.Default.ArrowTurnUpRight,
                 count = statModule.forward.count,
                 label = "转发",
+                enabled = !statModule.forward.forbidden,
                 onClick = { onRepostClick(item.id_str) },
                 modifier = Modifier.weight(actionButtonWeight)
             )
@@ -467,6 +641,7 @@ fun DynamicCardV2(
                 icon = io.github.alexzhirkevich.cupertino.icons.CupertinoIcons.Default.Message,
                 count = statModule.comment.count,
                 label = "评论",
+                enabled = !statModule.comment.forbidden,
                 onClick = { onCommentClick(item.id_str) },
                 modifier = Modifier.weight(actionButtonWeight)
             )
@@ -701,7 +876,12 @@ fun DynamicCardCompact(
                 )
                 Spacer(modifier = Modifier.width(8.dp))
                 Text(
-                    author?.pub_time ?: "",
+                    author?.let {
+                        resolveDynamicAuthorTimeText(
+                            pubTime = it.pub_time,
+                            pubTs = it.pub_ts
+                        )
+                    }.orEmpty(),
                     fontSize = 12.sp,
                     color = MaterialTheme.colorScheme.onSurfaceVariant.copy(0.5f)
                 )

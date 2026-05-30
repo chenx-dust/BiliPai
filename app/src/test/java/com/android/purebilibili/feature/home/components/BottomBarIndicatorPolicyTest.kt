@@ -1,6 +1,7 @@
 package com.android.purebilibili.feature.home.components
 
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.luminance
 import com.android.purebilibili.core.store.BottomBarLiquidGlassPreset
 import com.android.purebilibili.core.store.LiquidGlassMode
 import com.android.purebilibili.core.ui.motion.BottomBarMotionProfile
@@ -112,6 +113,195 @@ class BottomBarIndicatorPolicyTest {
         assertFalse(idle.useCombinedBackdrop)
         assertFalse(docked.captureTintedContentLayer)
         assertFalse(docked.useCombinedBackdrop)
+    }
+
+    @Test
+    fun `transitioning bottom pager keeps hidden refraction capture during tap pulse`() {
+        assertTrue(
+            shouldRenderBottomBarRefractionCapture(
+                glassEnabled = true,
+                hasBackdrop = true,
+                captureProgress = 1f,
+                isTransitionRunning = true,
+                isFeedScrollInProgress = false,
+                isBottomBarInteractionActive = true
+            )
+        )
+        assertFalse(
+            shouldRenderBottomBarRefractionCapture(
+                glassEnabled = true,
+                hasBackdrop = true,
+                captureProgress = 1f,
+                isTransitionRunning = true,
+                isFeedScrollInProgress = false,
+                isBottomBarInteractionActive = false
+            )
+        )
+        assertTrue(
+            shouldRenderBottomBarRefractionCapture(
+                glassEnabled = true,
+                hasBackdrop = true,
+                captureProgress = 1f,
+                isTransitionRunning = false,
+                isFeedScrollInProgress = false,
+                isBottomBarInteractionActive = true
+            )
+        )
+    }
+
+    @Test
+    fun `transitioning bottom pager uses opaque indicator fallback instead of transparent lens`() {
+        assertFalse(
+            shouldRenderBottomBarIndicatorBackdrop(
+                glassEnabled = true,
+                hasContentBackdrop = true,
+                indicatorProgress = 1f,
+                isTransitionRunning = true,
+                isBottomBarInteractionActive = true
+            )
+        )
+        assertTrue(
+            shouldRenderBottomBarIndicatorBackdrop(
+                glassEnabled = true,
+                hasContentBackdrop = true,
+                indicatorProgress = 1f,
+                isTransitionRunning = false,
+                isBottomBarInteractionActive = true
+            )
+        )
+    }
+
+    @Test
+    fun `transitioning bottom pager allows indicator backdrop only for click pulse`() {
+        assertTrue(
+            shouldRenderBottomBarIndicatorBackdrop(
+                glassEnabled = true,
+                hasContentBackdrop = true,
+                indicatorProgress = 1f,
+                isTransitionRunning = true,
+                isBottomBarInteractionActive = true,
+                allowTransitionIndicatorPulse = true
+            )
+        )
+        assertTrue(
+            shouldRenderBottomBarRefractionCapture(
+                glassEnabled = true,
+                hasBackdrop = true,
+                captureProgress = 1f,
+                isTransitionRunning = true,
+                isBottomBarInteractionActive = true
+            )
+        )
+    }
+
+    @Test
+    fun `indicator click settle pulse reuses indicator layer transform scale`() {
+        val pressed = resolveBottomBarIndicatorLayerTransform(
+            motionProgress = 1f,
+            velocityItemsPerSecond = 0f,
+            isDragging = false,
+            dragScaleProgress = 1f
+        )
+        val settled = resolveBottomBarIndicatorLayerTransform(
+            motionProgress = 0f,
+            velocityItemsPerSecond = 0f,
+            isDragging = false,
+            dragScaleProgress = 0f
+        )
+
+        assertTrue(pressed.scaleX >= 1.35f)
+        assertEquals(pressed.scaleX, pressed.scaleY)
+        assertEquals(1f, settled.scaleX)
+        assertEquals(1f, settled.scaleY)
+    }
+
+    @Test
+    fun `idle bottom bar does not render hidden capture or indicator backdrop`() {
+        assertFalse(
+            shouldRenderBottomBarRefractionCapture(
+                glassEnabled = true,
+                hasBackdrop = true,
+                captureProgress = 1f,
+                isTransitionRunning = false,
+                isFeedScrollInProgress = false,
+                isBottomBarInteractionActive = false
+            )
+        )
+        assertFalse(
+            shouldRenderBottomBarIndicatorBackdrop(
+                glassEnabled = true,
+                hasContentBackdrop = true,
+                indicatorProgress = 1f,
+                isTransitionRunning = false,
+                isBottomBarInteractionActive = false
+            )
+        )
+    }
+
+    @Test
+    fun `transparent glass preset keeps idle background refraction without content capture`() {
+        assertFalse(
+            shouldRenderBottomBarRefractionCapture(
+                glassEnabled = true,
+                hasBackdrop = true,
+                captureProgress = 1f,
+                isTransitionRunning = false,
+                isFeedScrollInProgress = false,
+                isBottomBarInteractionActive = false
+            )
+        )
+        assertTrue(
+            shouldRenderBottomBarIndicatorBackdrop(
+                glassEnabled = true,
+                hasContentBackdrop = true,
+                indicatorProgress = 1f,
+                isTransitionRunning = false,
+                isBottomBarInteractionActive = false,
+                allowIdleGlassEffect = true
+            )
+        )
+        assertFalse(
+            shouldRenderBottomBarIndicatorBackdrop(
+                glassEnabled = true,
+                hasContentBackdrop = true,
+                indicatorProgress = 1f,
+                isTransitionRunning = true,
+                isBottomBarInteractionActive = false,
+                allowIdleGlassEffect = true
+            )
+        )
+    }
+
+    @Test
+    fun `heavy bottom bar effects require settled interaction progress`() {
+        assertFalse(
+            shouldRenderBottomBarHeavyInteractiveEffects(
+                isTransitionRunning = true,
+                isBottomBarInteractionActive = true,
+                progress = 1f
+            )
+        )
+        assertFalse(
+            shouldRenderBottomBarHeavyInteractiveEffects(
+                isTransitionRunning = false,
+                isBottomBarInteractionActive = false,
+                progress = 1f
+            )
+        )
+        assertFalse(
+            shouldRenderBottomBarHeavyInteractiveEffects(
+                isTransitionRunning = false,
+                isBottomBarInteractionActive = true,
+                progress = 0f
+            )
+        )
+        assertTrue(
+            shouldRenderBottomBarHeavyInteractiveEffects(
+                isTransitionRunning = false,
+                isBottomBarInteractionActive = true,
+                progress = 1f
+            )
+        )
     }
 
     @Test
@@ -234,28 +424,28 @@ class BottomBarIndicatorPolicyTest {
     }
 
     @Test
-    fun `backdrop native preset damps bilipai horizontal refraction motion`() {
+    fun `bilipai tuned preset keeps original horizontal refraction motion`() {
         val profile = resolveBottomBarRefractionMotionProfile(
             position = 1.32f,
             velocity = 860f,
             isDragging = true
         )
         val effectiveProfile = resolveBottomBarEffectiveRefractionMotionProfile(
-            preset = BottomBarLiquidGlassPreset.BACKDROP_NATIVE,
+            preset = BottomBarLiquidGlassPreset.BILIPAI_TUNED,
             profile = profile
         )
 
         assertEquals(profile.progress, effectiveProfile.progress, 0.001f)
-        assertTrue(effectiveProfile.exportPanelOffsetFraction < profile.exportPanelOffsetFraction)
-        assertTrue(effectiveProfile.indicatorPanelOffsetFraction < profile.indicatorPanelOffsetFraction)
-        assertEquals(0f, effectiveProfile.visiblePanelOffsetFraction, 0.001f)
-        assertTrue(effectiveProfile.visibleSelectionEmphasis > profile.visibleSelectionEmphasis)
-        assertTrue(effectiveProfile.exportSelectionEmphasis > profile.exportSelectionEmphasis)
-        assertEquals(1f, effectiveProfile.exportCaptureWidthScale, 0.001f)
-        assertFalse(effectiveProfile.forceChromaticAberration)
-        assertEquals(1f, effectiveProfile.indicatorLensAmountScale, 0.001f)
-        assertEquals(1f, effectiveProfile.indicatorLensHeightScale, 0.001f)
-        assertEquals(1f, effectiveProfile.chromaticBoostScale, 0.001f)
+        assertEquals(profile.exportPanelOffsetFraction, effectiveProfile.exportPanelOffsetFraction, 0.001f)
+        assertEquals(profile.indicatorPanelOffsetFraction, effectiveProfile.indicatorPanelOffsetFraction, 0.001f)
+        assertEquals(profile.visiblePanelOffsetFraction, effectiveProfile.visiblePanelOffsetFraction, 0.001f)
+        assertEquals(profile.visibleSelectionEmphasis, effectiveProfile.visibleSelectionEmphasis, 0.001f)
+        assertEquals(profile.exportSelectionEmphasis, effectiveProfile.exportSelectionEmphasis, 0.001f)
+        assertEquals(profile.exportCaptureWidthScale, effectiveProfile.exportCaptureWidthScale, 0.001f)
+        assertEquals(profile.forceChromaticAberration, effectiveProfile.forceChromaticAberration)
+        assertEquals(profile.indicatorLensAmountScale, effectiveProfile.indicatorLensAmountScale, 0.001f)
+        assertEquals(profile.indicatorLensHeightScale, effectiveProfile.indicatorLensHeightScale, 0.001f)
+        assertEquals(profile.chromaticBoostScale, effectiveProfile.chromaticBoostScale, 0.001f)
     }
 
     @Test
@@ -266,32 +456,6 @@ class BottomBarIndicatorPolicyTest {
         assertEquals(0f, idle, 0.001f)
         assertTrue(idle < moving)
         assertEquals(1f, moving, 0.001f)
-    }
-
-    @Test
-    fun `vertical glass motion is neutral when glass is disabled`() {
-        val profile = resolveBottomBarVerticalGlassMotionProfile(
-            scrollOffsetPx = 600f,
-            glassEnabled = false
-        )
-
-        assertEquals(0f, profile.progress, 0.001f)
-    }
-
-    @Test
-    fun `vertical glass motion only resolves backdrop preset progress`() {
-        val idle = resolveBottomBarVerticalGlassMotionProfile(
-            scrollOffsetPx = 0f,
-            glassEnabled = true
-        )
-        val scrolled = resolveBottomBarVerticalGlassMotionProfile(
-            scrollOffsetPx = 180f,
-            glassEnabled = true
-        )
-
-        assertEquals(0f, idle.progress, 0.001f)
-        assertTrue(scrolled.progress > idle.progress)
-        assertEquals(1f, scrolled.progress, 0.001f)
     }
 
     @Test
@@ -306,30 +470,163 @@ class BottomBarIndicatorPolicyTest {
     }
 
     @Test
-    fun `backdrop native surface stays frosted without jelly distortion`() {
-        val idle = resolveBottomBarBackdropNativeSurfaceSpec(
-            blurRadiusDp = 18f,
-            verticalProgress = 0f
-        )
-        val scrolled = resolveBottomBarBackdropNativeSurfaceSpec(
-            blurRadiusDp = 18f,
-            verticalProgress = 1f
+    fun `stationary tap press activates indicator refraction preset`() {
+        val progress = resolveBottomBarBackdropPresetProgress(
+            motionProgress = 0f,
+            verticalProgress = 0f,
+            pressProgress = 1f
         )
 
-        assertTrue(idle.blurRadiusDp <= 7.2f)
-        assertTrue(scrolled.blurRadiusDp >= idle.blurRadiusDp)
-        assertTrue(scrolled.refractionHeightDp > idle.refractionHeightDp)
-        assertTrue(scrolled.refractionAmountDp > idle.refractionAmountDp)
-        assertTrue(idle.refractionHeightDp >= 16f)
-        assertTrue(idle.refractionAmountDp >= 14f)
-        assertTrue(scrolled.refractionHeightDp <= 26f)
-        assertTrue(scrolled.refractionAmountDp <= 22f)
-        assertTrue(scrolled.surfaceAlphaMultiplier < idle.surfaceAlphaMultiplier)
-        assertTrue(idle.surfaceAlphaMultiplier <= 0.58f)
-        assertTrue(scrolled.surfaceAlphaMultiplier <= 0.42f)
-        assertTrue(scrolled.highlightAlpha > idle.highlightAlpha)
-        assertTrue(scrolled.shadowAlpha > idle.shadowAlpha)
-        assertFalse(scrolled.chromaticAberration)
+        assertEquals(1f, progress.shellProgress, 0.001f)
+        assertTrue(progress.captureProgress > 0f)
+        assertEquals(1f, progress.indicatorProgress, 0.001f)
+    }
+
+    @Test
+    fun `indicator glow follows press progress only when glass is enabled`() {
+        assertEquals(
+            0.72f,
+            resolveBottomBarIndicatorGlowAlpha(
+                glassEnabled = true,
+                pressProgress = 0.72f,
+                motionProgress = 0f
+            ),
+            0.001f
+        )
+        assertEquals(
+            1f,
+            resolveBottomBarIndicatorGlowAlpha(
+                glassEnabled = true,
+                pressProgress = 1.4f,
+                motionProgress = 0f
+            ),
+            0.001f
+        )
+        assertEquals(
+            0f,
+            resolveBottomBarIndicatorGlowAlpha(
+                glassEnabled = false,
+                pressProgress = 1f,
+                motionProgress = 1f
+            ),
+            0.001f
+        )
+    }
+
+    @Test
+    fun `indicator glow follows drag motion even without press progress`() {
+        assertEquals(
+            0.64f,
+            resolveBottomBarIndicatorGlowAlpha(
+                glassEnabled = true,
+                pressProgress = 0f,
+                motionProgress = 0.64f
+            ),
+            0.001f
+        )
+    }
+
+    @Test
+    fun `shell highlight follows indicator motion while dragging`() {
+        assertEquals(
+            0.86f,
+            resolveBottomBarShellHighlightAlpha(
+                glassEnabled = true,
+                pressProgress = 0.12f,
+                motionProgress = 0.86f
+            ),
+            0.001f
+        )
+        assertEquals(
+            0.72f,
+            resolveBottomBarShellHighlightAlpha(
+                glassEnabled = true,
+                pressProgress = 0.72f,
+                motionProgress = 0.18f
+            ),
+            0.001f
+        )
+    }
+
+    @Test
+    fun `shell highlight keeps a floor while dragging so it stays pinned`() {
+        // 慢拖时 press/motion 都低,但拖拽中高光应保持可见(跟手)
+        assertEquals(
+            0.6f,
+            resolveBottomBarShellHighlightAlpha(
+                glassEnabled = true,
+                pressProgress = 0.1f,
+                motionProgress = 0.2f,
+                isDragging = true
+            ),
+            0.001f
+        )
+        // 非拖拽时无地板,沿用 max(press, motion)
+        assertEquals(
+            0.2f,
+            resolveBottomBarShellHighlightAlpha(
+                glassEnabled = true,
+                pressProgress = 0.1f,
+                motionProgress = 0.2f,
+                isDragging = false
+            ),
+            0.001f
+        )
+        // 高 motion 不被地板压低
+        assertEquals(
+            0.9f,
+            resolveBottomBarShellHighlightAlpha(
+                glassEnabled = true,
+                pressProgress = 0f,
+                motionProgress = 0.9f,
+                isDragging = true
+            ),
+            0.001f
+        )
+    }
+
+    @Test
+    fun `interactive highlight center follows indicator and panel offset`() {
+        assertEquals(
+            124f,
+            resolveBottomBarInteractiveHighlightCenterX(
+                indicatorTranslationXPx = 80f,
+                itemWidthPx = 72f,
+                panelOffsetPx = 8f
+            ),
+            0.001f
+        )
+    }
+
+    @Test
+    fun `interactive highlight modifier draws over existing surface`() {
+        val source = listOf(
+            java.io.File("app/src/main/java/com/android/purebilibili/feature/home/components/BottomBar.kt"),
+            java.io.File("src/main/java/com/android/purebilibili/feature/home/components/BottomBar.kt")
+        ).first { it.exists() }.readText()
+        val highlightModifierSource = source
+            .substringAfter("private fun Modifier.bottomBarInteractiveHighlight(")
+            .substringBefore("internal fun resolveBottomBarBackdropPresetCaptureLens(")
+
+        assertTrue(highlightModifierSource.indexOf("drawContent()") >= 0)
+        assertTrue(
+            highlightModifierSource.indexOf("drawContent()") <
+                highlightModifierSource.indexOf("Brush.radialGradient(")
+        )
+    }
+
+    @Test
+    fun `tap press can reuse indicator drag scale without horizontal motion`() {
+        val transform = resolveBottomBarIndicatorLayerTransform(
+            motionProgress = 1f,
+            velocityItemsPerSecond = 0f,
+            isDragging = false,
+            dragScaleProgress = 1f
+        )
+
+        assertTrue(transform.scaleX > 1f)
+        assertTrue(transform.scaleY > 1f)
+        assertEquals(transform.scaleX, transform.scaleY, 0.001f)
     }
 
     @Test
@@ -355,11 +652,135 @@ class BottomBarIndicatorPolicyTest {
         val transform = resolveBottomBarIndicatorLayerTransform(
             motionProgress = 1f,
             velocityItemsPerSecond = 0f,
+            isDragging = true,
             motionSpec = resolveBottomBarMotionSpec(BottomBarMotionProfile.ANDROID_NATIVE_FLOATING)
         )
 
-        assertTrue(transform.scaleX > 1.5f)
-        assertTrue(transform.scaleY > 1.5f)
+        assertEquals(88f / 56f, transform.scaleX, 0.001f)
+        assertEquals(88f / 56f, transform.scaleY, 0.001f)
+    }
+
+    @Test
+    fun `indicator keeps enlarged base during active drag while preserving velocity deformation`() {
+        val partial = resolveBottomBarIndicatorLayerTransform(
+            motionProgress = 0.12f,
+            velocityItemsPerSecond = 0f,
+            isDragging = true,
+            motionSpec = resolveBottomBarMotionSpec(BottomBarMotionProfile.ANDROID_NATIVE_FLOATING)
+        )
+        val full = resolveBottomBarIndicatorLayerTransform(
+            motionProgress = 1f,
+            velocityItemsPerSecond = 0f,
+            isDragging = true,
+            motionSpec = resolveBottomBarMotionSpec(BottomBarMotionProfile.ANDROID_NATIVE_FLOATING)
+        )
+        val deformed = resolveBottomBarIndicatorLayerTransform(
+            motionProgress = 0.12f,
+            velocityItemsPerSecond = 2f,
+            isDragging = true,
+            motionSpec = resolveBottomBarMotionSpec(BottomBarMotionProfile.ANDROID_NATIVE_FLOATING)
+        )
+
+        assertEquals(full.scaleX, partial.scaleX, 0.001f)
+        assertEquals(full.scaleY, partial.scaleY, 0.001f)
+        assertEquals(88f / 56f, partial.scaleX, 0.001f)
+        assertEquals(88f / 56f, partial.scaleY, 0.001f)
+        assertTrue(deformed.scaleX > partial.scaleX)
+        assertTrue(deformed.scaleY < partial.scaleY)
+    }
+
+    @Test
+    fun `indicator does not enlarge during tap driven switch motion`() {
+        val transform = resolveBottomBarIndicatorLayerTransform(
+            motionProgress = 1f,
+            velocityItemsPerSecond = 2f,
+            isDragging = false,
+            dragScaleProgress = 0f,
+            motionSpec = resolveBottomBarMotionSpec(BottomBarMotionProfile.ANDROID_NATIVE_FLOATING)
+        )
+
+        assertEquals(1f, transform.scaleX, 0.001f)
+        assertEquals(1f, transform.scaleY, 0.001f)
+    }
+
+    @Test
+    fun `indicator drag enlargement can ease back with velocity deformation`() {
+        val settling = resolveBottomBarIndicatorLayerTransform(
+            motionProgress = 1f,
+            velocityItemsPerSecond = 2f,
+            isDragging = false,
+            dragScaleProgress = 0.5f,
+            motionSpec = resolveBottomBarMotionSpec(BottomBarMotionProfile.ANDROID_NATIVE_FLOATING)
+        )
+        val full = resolveBottomBarIndicatorLayerTransform(
+            motionProgress = 1f,
+            velocityItemsPerSecond = 0f,
+            isDragging = true,
+            dragScaleProgress = 1f,
+            motionSpec = resolveBottomBarMotionSpec(BottomBarMotionProfile.ANDROID_NATIVE_FLOATING)
+        )
+
+        assertTrue(settling.scaleX > 1f)
+        assertTrue(settling.scaleX < full.scaleX)
+        assertTrue(settling.scaleX > settling.scaleY)
+        assertTrue(settling.scaleY > 1f)
+    }
+
+    @Test
+    fun `settle rebound transform is subtle and returns to neutral`() {
+        val compressed = resolveBottomBarSettleReboundTransform(progress = 0.1f)
+        val rebound = resolveBottomBarSettleReboundTransform(progress = 0.46f)
+        val idle = resolveBottomBarSettleReboundTransform(progress = 1f)
+
+        assertTrue(compressed.scaleX < 1f)
+        assertTrue(compressed.scaleX >= 0.97f)
+        assertTrue(rebound.scaleX > 1f)
+        assertTrue(rebound.scaleX <= 1.06f)
+        assertEquals(1f, idle.scaleX, 0.001f)
+        assertEquals(1f, idle.scaleY, 0.001f)
+    }
+
+    @Test
+    fun `shared segmented control ignores tap press for refraction when disabled`() {
+        assertEquals(
+            0f,
+            resolveSegmentedControlMotionProgress(
+                pressProgress = 1f,
+                refractionProgress = 0f,
+                tapPressRefractionEnabled = false
+            ),
+            0.001f
+        )
+        assertEquals(
+            1f,
+            resolveSegmentedControlMotionProgress(
+                pressProgress = 1f,
+                refractionProgress = 0f,
+                tapPressRefractionEnabled = true
+            ),
+            0.001f
+        )
+        assertEquals(
+            0.42f,
+            resolveSegmentedControlMotionProgress(
+                pressProgress = 1f,
+                refractionProgress = 0.42f,
+                tapPressRefractionEnabled = false
+            ),
+            0.001f
+        )
+    }
+
+    @Test
+    fun `shared segmented control motion is calmer than bottom dock`() {
+        val bottomDock = resolveBottomBarMotionSpec(BottomBarMotionProfile.ANDROID_NATIVE_FLOATING)
+        val segmented = resolveSegmentedControlMotionSpec()
+
+        assertTrue(segmented.drag.selectionSpring.stiffness < bottomDock.drag.selectionSpring.stiffness)
+        assertTrue(segmented.drag.selectionSpring.dampingRatio > bottomDock.drag.selectionSpring.dampingRatio)
+        assertTrue(segmented.refraction.speedProgressDivisorPxPerSecond > bottomDock.refraction.speedProgressDivisorPxPerSecond)
+        assertTrue(segmented.refraction.dragProgressFloor < bottomDock.refraction.dragProgressFloor)
+        assertTrue(segmented.refraction.panelOffsetMaxDp < bottomDock.refraction.panelOffsetMaxDp)
     }
 
     @Test
@@ -384,103 +805,187 @@ class BottomBarIndicatorPolicyTest {
     }
 
     @Test
-    fun `sliding item visuals follow indicator instead of fixed selected tab`() {
-        val home = resolveBottomBarItemMotionVisual(
+    fun `sliding item coverage follows indicator instead of fixed selected tab`() {
+        val home = resolveBottomBarItemCoverage(
             itemIndex = 0,
             indicatorPosition = 0.8f,
             currentSelectedIndex = 0,
-            motionProgress = 1f,
-            selectionEmphasis = 0.28f
+            motionProgress = 1f
         )
-        val dynamic = resolveBottomBarItemMotionVisual(
+        val dynamic = resolveBottomBarItemCoverage(
             itemIndex = 1,
             indicatorPosition = 0.8f,
             currentSelectedIndex = 0,
-            motionProgress = 1f,
-            selectionEmphasis = 0.28f
+            motionProgress = 1f
         )
 
-        assertTrue(dynamic.themeWeight > home.themeWeight)
-        assertEquals(1f, home.scale, 0.001f)
-        assertEquals(1f, dynamic.scale, 0.001f)
+        assertTrue(dynamic > home)
+        assertTrue(
+            resolveBottomBarItemMotionScale(dynamic, motionProgress = 1f) >
+                resolveBottomBarItemMotionScale(home, motionProgress = 1f)
+        )
     }
 
     @Test
-    fun `sliding item visual fills icon for item covered by indicator`() {
-        val home = resolveBottomBarItemMotionVisual(
+    fun `sliding item coverage fills icon for item covered by indicator`() {
+        val home = resolveBottomBarItemCoverage(
             itemIndex = 0,
             indicatorPosition = 0.8f,
             currentSelectedIndex = 0,
-            motionProgress = 1f,
-            selectionEmphasis = 0.28f
+            motionProgress = 1f
         )
-        val dynamic = resolveBottomBarItemMotionVisual(
+        val dynamic = resolveBottomBarItemCoverage(
             itemIndex = 1,
             indicatorPosition = 0.8f,
             currentSelectedIndex = 0,
-            motionProgress = 1f,
-            selectionEmphasis = 0.28f
+            motionProgress = 1f
         )
 
-        assertTrue(home.themeWeight in 0f..1f)
-        assertTrue(dynamic.themeWeight in 0f..1f)
-        assertFalse(home.useSelectedIcon)
-        assertTrue(dynamic.useSelectedIcon)
+        assertTrue(home in 0f..1f)
+        assertTrue(dynamic in 0f..1f)
+        assertFalse(home >= 0.5f)
+        assertTrue(dynamic >= 0.5f)
     }
 
     @Test
-    fun `sliding item selected icon alpha follows indicator position continuously`() {
-        val home = resolveBottomBarItemMotionVisual(
+    fun `sliding item coverage drives selected icon alpha continuously`() {
+        val home = resolveBottomBarItemCoverage(
             itemIndex = 0,
             indicatorPosition = 0.8f,
             currentSelectedIndex = 0,
-            motionProgress = 1f,
-            selectionEmphasis = 0.28f
+            motionProgress = 1f
         )
-        val dynamic = resolveBottomBarItemMotionVisual(
+        val dynamic = resolveBottomBarItemCoverage(
             itemIndex = 1,
             indicatorPosition = 0.8f,
             currentSelectedIndex = 0,
-            motionProgress = 1f,
-            selectionEmphasis = 0.28f
+            motionProgress = 1f
         )
 
-        assertEquals(0.2f, home.selectedIconAlpha, 0.001f)
-        assertEquals(0.8f, dynamic.selectedIconAlpha, 0.001f)
+        assertEquals(0.2f, home, 0.001f)
+        assertEquals(0.8f, dynamic, 0.001f)
     }
 
     @Test
-    fun `sliding item color weight follows indicator position without emphasis cap`() {
-        val dynamic = resolveBottomBarItemMotionVisual(
+    fun `sliding item color weight is the indicator coverage`() {
+        val dynamic = resolveBottomBarItemCoverage(
             itemIndex = 1,
             indicatorPosition = 0.8f,
             currentSelectedIndex = 0,
-            motionProgress = 1f,
-            selectionEmphasis = 0.28f
+            motionProgress = 1f
         )
 
-        assertEquals(0.8f, dynamic.themeWeight, 0.001f)
+        assertEquals(0.8f, dynamic, 0.001f)
     }
 
     @Test
-    fun `sliding item scale stays fixed so icons do not vertically compress`() {
-        val home = resolveBottomBarItemMotionVisual(
+    fun `edge overscroll clamps visual indicator position and keeps selected coverage stable`() {
+        val startVisualPosition = resolveBottomBarVisualIndicatorPosition(
+            rawPosition = -0.36f,
+            itemCount = 5
+        )
+        val endVisualPosition = resolveBottomBarVisualIndicatorPosition(
+            rawPosition = 4.36f,
+            itemCount = 5
+        )
+
+        assertEquals(0f, startVisualPosition, 0.001f)
+        assertEquals(4f, endVisualPosition, 0.001f)
+        assertEquals(
+            1f,
+            resolveBottomBarItemCoverage(
+                itemIndex = 0,
+                indicatorPosition = startVisualPosition,
+                currentSelectedIndex = 0,
+                motionProgress = 1f
+            ),
+            0.001f
+        )
+        assertEquals(
+            0f,
+            resolveBottomBarItemCoverage(
+                itemIndex = 1,
+                indicatorPosition = startVisualPosition,
+                currentSelectedIndex = 0,
+                motionProgress = 1f
+            ),
+            0.001f
+        )
+        assertEquals(
+            1f,
+            resolveBottomBarItemCoverage(
+                itemIndex = 4,
+                indicatorPosition = endVisualPosition,
+                currentSelectedIndex = 4,
+                motionProgress = 1f
+            ),
+            0.001f
+        )
+        assertEquals(
+            0f,
+            resolveBottomBarItemCoverage(
+                itemIndex = 3,
+                indicatorPosition = endVisualPosition,
+                currentSelectedIndex = 4,
+                motionProgress = 1f
+            ),
+            0.001f
+        )
+    }
+
+    @Test
+    fun `edge strain reports only overscroll beyond the visual bounds`() {
+        assertEquals(
+            -0.36f,
+            resolveBottomBarEdgeStrain(rawPosition = -0.36f, itemCount = 5),
+            0.001f
+        )
+        assertEquals(
+            0.36f,
+            resolveBottomBarEdgeStrain(rawPosition = 4.36f, itemCount = 5),
+            0.001f
+        )
+        assertEquals(
+            0f,
+            resolveBottomBarEdgeStrain(rawPosition = 2.25f, itemCount = 5),
+            0.001f
+        )
+    }
+
+    @Test
+    fun `sliding item scale is derived from shared coverage`() {
+        val home = resolveBottomBarItemCoverage(
             itemIndex = 0,
             indicatorPosition = 0.8f,
             currentSelectedIndex = 0,
-            motionProgress = 1f,
-            selectionEmphasis = 0.28f
+            motionProgress = 1f
         )
-        val dynamic = resolveBottomBarItemMotionVisual(
+        val dynamic = resolveBottomBarItemCoverage(
             itemIndex = 1,
             indicatorPosition = 0.8f,
             currentSelectedIndex = 0,
-            motionProgress = 1f,
-            selectionEmphasis = 0.28f
+            motionProgress = 1f
         )
 
-        assertEquals(1f, home.scale, 0.001f)
-        assertEquals(1f, dynamic.scale, 0.001f)
+        assertTrue(resolveBottomBarItemMotionScale(dynamic, motionProgress = 1f) > 1f)
+        assertTrue(resolveBottomBarItemMotionScale(home, motionProgress = 1f) > 1f)
+    }
+
+    @Test
+    fun `sampled item scale follows press progress even before indicator covers the tab`() {
+        val notCoveredScale = resolveBottomBarSampledItemMotionScale(
+            coverage = 0f,
+            motionProgress = 1f,
+            pressProgress = 1f
+        )
+        val partiallyCoveredScale = resolveBottomBarSampledItemMotionScale(
+            coverage = 0.25f,
+            motionProgress = 1f,
+            pressProgress = 1f
+        )
+
+        assertEquals(1.2f, notCoveredScale, 0.001f)
+        assertEquals(1.2f, partiallyCoveredScale, 0.001f)
     }
 
     @Test
@@ -515,47 +1020,42 @@ class BottomBarIndicatorPolicyTest {
 
     @Test
     fun `sliding color transfers continuously from current tab to next tab`() {
-        val home = resolveBottomBarItemMotionVisual(
+        val home = resolveBottomBarItemCoverage(
             itemIndex = 0,
             indicatorPosition = 0.2f,
             currentSelectedIndex = 0,
-            motionProgress = 1f,
-            selectionEmphasis = 0.28f
+            motionProgress = 1f
         )
-        val dynamic = resolveBottomBarItemMotionVisual(
+        val dynamic = resolveBottomBarItemCoverage(
             itemIndex = 1,
             indicatorPosition = 0.2f,
             currentSelectedIndex = 0,
-            motionProgress = 1f,
-            selectionEmphasis = 0.28f
+            motionProgress = 1f
         )
 
-        assertEquals(0.8f, home.themeWeight, 0.001f)
-        assertEquals(0.2f, dynamic.themeWeight, 0.001f)
+        assertEquals(0.8f, home, 0.001f)
+        assertEquals(0.2f, dynamic, 0.001f)
     }
 
     @Test
     fun `sliding item scale only affects indicator neighbors`() {
-        val home = resolveBottomBarItemMotionVisual(
+        val home = resolveBottomBarItemCoverage(
             itemIndex = 0,
             indicatorPosition = 0.5f,
             currentSelectedIndex = 0,
-            motionProgress = 1f,
-            selectionEmphasis = 0.28f
+            motionProgress = 1f
         )
-        val dynamic = resolveBottomBarItemMotionVisual(
+        val dynamic = resolveBottomBarItemCoverage(
             itemIndex = 1,
             indicatorPosition = 0.5f,
             currentSelectedIndex = 0,
-            motionProgress = 1f,
-            selectionEmphasis = 0.28f
+            motionProgress = 1f
         )
-        val history = resolveBottomBarItemMotionVisual(
+        val history = resolveBottomBarItemCoverage(
             itemIndex = 2,
             indicatorPosition = 0.5f,
             currentSelectedIndex = 0,
-            motionProgress = 1f,
-            selectionEmphasis = 0.28f
+            motionProgress = 1f
         )
         val profile = resolveBottomBarRefractionMotionProfile(
             position = 0.5f,
@@ -563,11 +1063,31 @@ class BottomBarIndicatorPolicyTest {
             isDragging = true
         )
 
-        assertEquals(1f, home.scale, 0.001f)
-        assertEquals(1f, dynamic.scale, 0.001f)
-        assertEquals(1f, history.scale)
-        assertEquals(0f, history.themeWeight)
+        assertTrue(resolveBottomBarItemMotionScale(home, motionProgress = 1f) > 1f)
+        assertTrue(resolveBottomBarItemMotionScale(dynamic, motionProgress = 1f) > 1f)
+        assertEquals(1f, resolveBottomBarItemMotionScale(history, motionProgress = 1f))
+        assertEquals(0f, history)
         assertTrue(profile.progress > 0f)
+    }
+
+    @Test
+    fun `idle item coverage follows visual indicator instead of selected page`() {
+        val home = resolveBottomBarItemCoverage(
+            itemIndex = 0,
+            indicatorPosition = 0.5f,
+            currentSelectedIndex = 0,
+            motionProgress = 0f
+        )
+        val dynamic = resolveBottomBarItemCoverage(
+            itemIndex = 1,
+            indicatorPosition = 0.5f,
+            currentSelectedIndex = 0,
+            motionProgress = 0f
+        )
+
+        assertEquals(0.5f, home, 0.001f)
+        assertEquals(0.5f, dynamic, 0.001f)
+        assertEquals(1f, resolveBottomBarItemMotionScale(home, motionProgress = 0f), 0.001f)
     }
 
     @Test

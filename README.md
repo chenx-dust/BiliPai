@@ -15,7 +15,7 @@
 </p>
 
 <p>
-  <img src="https://img.shields.io/badge/Version-8.0.8-007AFF?style=flat-square&labelColor=ffffff" alt="Version 8.0.8" />
+  <img src="https://img.shields.io/badge/Version-8.7.0-007AFF?style=flat-square&labelColor=ffffff" alt="Version 8.7.0" />
   <img src="https://img.shields.io/badge/Android-8.0%2B-34C759?style=flat-square&logo=android&logoColor=white" alt="Android 8.0+" />
   <img src="https://img.shields.io/badge/Kotlin-100%25-7F52FF?style=flat-square&logo=kotlin&logoColor=white" alt="Kotlin" />
   <img src="https://img.shields.io/badge/License-GPL--3.0-FF3B30?style=flat-square" alt="GPL-3.0" />
@@ -37,7 +37,7 @@
   </a>
 </p>
 
-<sub>README 更新：2026-05-08 · 当前构建版本以 app/build.gradle.kts 为准 · 发布记录以 <a href="CHANGELOG.md">CHANGELOG.md</a> 为准</sub>
+<sub>README 更新：2026-05-28 · 当前构建版本以 app/build.gradle.kts 为准 · 发布记录以 <a href="CHANGELOG.md">CHANGELOG.md</a> 为准</sub>
 
 </div>
 
@@ -49,9 +49,9 @@ BiliPai 是一个用 Kotlin 与 Jetpack Compose 构建的 Android 客户端，�
 
 - **日常使用优先**：首页、搜索、视频详情、番剧、直播、动态、消息、个人中心与离线缓存覆盖主流程。
 - **播放体验优先**：DASH、高清画质、弹幕、手势、后台播放、画中画、听视频模式与横竖屏策略持续优化。
-- **原生体验优先**：Material You、Material 3 Expressive、液态玻璃、平板/折叠屏布局与系统媒体控制接入。
+- **原生体验优先**：Material You、Material 3、Miuix、液态玻璃、平板/折叠屏布局与系统媒体控制接入。
 - **可扩展优先**：内置插件稳定分发，JSON 规则插件可 URL 导入，源码级插件能力持续推进。
-- **隐私克制**：登录信息保存在本地，权限尽量收敛，使用统计默认关闭。
+- **隐私克制**：登录信息保存在本地，权限尽量收敛，使用统计仅记录匿名日活与基础使用情况。
 
 > [!IMPORTANT]
 > 应用默认设置面向通用场景。安装后建议进入 **设置** 调整外观、动画、播放、弹幕、后台播放和插件选项。
@@ -88,6 +88,7 @@ BiliPai 是一个用 Kotlin 与 Jetpack Compose 构建的 Android 客户端，�
 | 模块 | 能力 |
 | --- | --- |
 | 视频播放 | DASH 自适应码率、4K / 1080P60 / HDR、弹幕、手势、倍速、后台播放、画中画、播放记忆 |
+| 视频笔记 | 私有笔记、新建/编辑/删除、AI 总结生成草稿、富文本编辑、时间点、Markdown 中间格式、系统分享 |
 | 听视频 | 沉浸式 / 黑胶唱片模式、歌词、播放列表、定时关闭、系统媒体中心联动 |
 | 番剧影视 | 选集面板、季度/版本切换、横屏顶部操作、追番与播放进度 |
 | 直播 | 分区浏览、HLS 播放、实时弹幕、动态卡片跳转直播间 |
@@ -101,7 +102,7 @@ BiliPai 是一个用 Kotlin 与 Jetpack Compose 构建的 Android 客户端，�
 
 BiliPai 的界面围绕“内容优先、控制轻量、动效克制”调整。
 
-- **Material You / Material 3 Expressive**：支持动态主题色、表达性形状、排版和 motion 策略。
+- **Material You / Android 原生**：支持动态主题色、Material 3 与 Miuix 子风格、排版和 motion 策略。
 - **Liquid Glass**：底栏、顶部区域、播放器面板等关键层接入毛玻璃/液态玻璃视觉。
 - **iOS 风格底栏**：胶囊指示器、阻尼回弹、模糊背景与大屏侧边栏之间保持统一。
 - **播放器覆盖层**：控制栏、弹幕、预览图、手势区域和横屏信息栏分层处理，减少互相遮挡。
@@ -111,7 +112,7 @@ BiliPai 的界面围绕“内容优先、控制轻量、动效克制”调整。
 
 | 形态 | 当前状态 | 文档 |
 | --- | --- | --- |
-| 内置插件 | 随主应用稳定分发，覆盖空降助手、去广告、弹幕增强、夜间护眼、今日推荐单、CDN 属地优选 | 应用内插件中心 |
+| 内置插件 | 随主应用稳定分发，覆盖空降助手、去广告、弹幕增强、夜间护眼、今日推荐单、CDN 属地优选、初见推荐 | 应用内插件中心 |
 | JSON / `.bp` 规则插件 | 支持 URL 导入，适合推荐流过滤、弹幕过滤与高亮 | [JSON 插件开发](docs/PLUGIN_DEVELOPMENT.md) |
 | 外部 `.bpplugin` 包 | SDK、包格式、manifest、签名校验已就绪；外部 Dex 执行仍处于预览阶段 | [Plugin SDK](plugins/sdk/README.md) |
 | 源码级原生插件 | 适合复杂播放器、推荐、弹幕能力，需要重新编译 APK | [原生插件开发](docs/NATIVE_PLUGIN_DEVELOPMENT.md) |
@@ -119,12 +120,14 @@ BiliPai 的界面围绕“内容优先、控制轻量、动效克制”调整。
 > [!CAUTION]
 > 导入第三方插件前请审阅规则和能力声明，尤其是 `NETWORK`、`LOCAL_HISTORY_READ`、`LOCAL_FEEDBACK_READ`、`PLAYER_CONTROL` 等敏感能力。
 
+> 初见推荐致谢原作者 wangdaodao 的 [TabulaBili](https://github.com/wangdaodaodao/TabulaBili) 与 tjsky 的 [TabulaBili-Plus](https://github.com/tjsky/TabulaBili)，BiliPai 仅实现 Android 端内置插件形态。
+
 ## 技术栈
 
 | 类别 | 选型 |
 | --- | --- |
 | 语言 | Kotlin |
-| UI | Jetpack Compose、Material 3、Material 3 Expressive、MVVM |
+| UI | Jetpack Compose、Material 3、Miuix、MVVM |
 | 网络 | Retrofit、OkHttp、Kotlinx Serialization |
 | 存储 | Room、DataStore |
 | 媒体 | AndroidX Media3 / ExoPlayer、MediaCodec |
@@ -179,13 +182,17 @@ cd BiliPai
 
 ## 最近更新
 
-当前仓库版本号已更新到 `8.0.8 / versionCode 181`。公开发布说明请以 [CHANGELOG.md](CHANGELOG.md) 为准；最新完整记录为 `v8.0.8`：
+当前仓库版本号已更新到 `8.7.0 / versionCode 211`。公开发布说明请以 [CHANGELOG.md](CHANGELOG.md) 为准；最新完整记录为 `v8.7.0`：
 
-- 底栏新增 Backdrop Native 液态玻璃预设，横向折射、色散和选中态强调更克制。
-- 底栏滚动联动改为材质透明度、高光、阴影和轻量折射变化，不再带动整条底栏明显缩放晃动。
-- 空间页投稿视频新增网格/单列布局切换，默认保留原网格浏览，单列模式复用归档列表行样式。
-- 画中画和系统媒体控制拆出明确播放/暂停动作，降低状态滞后导致的误触发。
-- 补充底栏动画、空间页布局与迷你播放器媒体控制策略测试。
+- 新增 iOS26 底栏液态玻璃预设，提供更厚边缘折射、轻色散和亮面滚动反馈。
+- 修复 iOS26 预设滑动停止时底栏整体闪烁，上下滑动时底栏会连续轻微提亮。
+- 修复首页竖屏视频入口，竖屏视频从首页进入详情时可提前进入竖屏全屏状态。
+- 将“我的”Tab 重写为空间首页式布局，个人资料、收藏和追番内容承载更统一。
+- 修复空间首页视频封面不可见、收藏夹封面字段缺失和服务入口展示不完整。
+- 完善空间首页动态、收藏和追番模块，追番卡片可跳转番剧详情。
+- 修复系统通知页面闪退、通知链接解析和动态时间显示问题。
+- 修复动态顶部遮挡用户信息，动态卡片和转发内容显示更稳定。
+- 修复低版本 Android 上 Haze 视觉效果闪退，并补齐可恢复视觉效果兜底。
 
 ## 路线图
 

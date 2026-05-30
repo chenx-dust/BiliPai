@@ -349,7 +349,11 @@ class DanmakuManager private constructor(
         rawDanmakuList = projectedStandardList
 
         if (config.mergeDuplicates) {
-            val (mergedStandard, mergedAdvanced) = DanmakuMerger.merge(projectedStandardList)
+            val (mergedStandard, mergedAdvanced) = DanmakuMerger.merge(
+                list = projectedStandardList,
+                intervalMs = config.duplicateMergeWindowMs.toLong(),
+                countThreshold = config.duplicateMergeCountThreshold
+            )
             cachedDanmakuList = mergedStandard
             val settings = currentTypeFilterSettings()
             val visibleMergedAdvanced = mergedAdvanced.filter { merged ->
@@ -790,6 +794,8 @@ class DanmakuManager private constructor(
         staticDanmakuToScroll: Boolean = this.staticDanmakuToScroll,
         massiveMode: Boolean = this.massiveMode,
         mergeDuplicates: Boolean = config.mergeDuplicates,
+        duplicateMergeWindowMs: Int = config.duplicateMergeWindowMs,
+        duplicateMergeCountThreshold: Int = config.duplicateMergeCountThreshold,
         allowScroll: Boolean = config.allowScroll,
         allowTop: Boolean = config.allowTop,
         allowBottom: Boolean = config.allowBottom,
@@ -798,7 +804,9 @@ class DanmakuManager private constructor(
         blockedRules: List<String> = config.blockedRules,
         smartOcclusion: Boolean = config.smartOcclusionEnabled
     ) {
-        val mergeChanged = config.mergeDuplicates != mergeDuplicates
+        val mergeChanged = config.mergeDuplicates != mergeDuplicates ||
+            config.duplicateMergeWindowMs != duplicateMergeWindowMs ||
+            config.duplicateMergeCountThreshold != duplicateMergeCountThreshold
         val blockedRulesChanged = config.blockedRules != blockedRules
         val filterChanged =
             config.allowScroll != allowScroll ||
@@ -822,6 +830,8 @@ class DanmakuManager private constructor(
         config.staticDanmakuToScroll = staticDanmakuToScroll
         config.massiveMode = massiveMode
         config.mergeDuplicates = mergeDuplicates
+        config.duplicateMergeWindowMs = duplicateMergeWindowMs
+        config.duplicateMergeCountThreshold = duplicateMergeCountThreshold
         config.allowScroll = allowScroll
         config.allowTop = allowTop
         config.allowBottom = allowBottom

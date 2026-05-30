@@ -2,7 +2,6 @@ package com.android.purebilibili.feature.home.components
 
 import androidx.compose.ui.unit.dp
 import com.android.purebilibili.core.store.BottomBarSearchAutoExpandMode
-import com.android.purebilibili.core.theme.AndroidNativeVariant
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertTrue
@@ -23,25 +22,6 @@ class BottomBarLayoutPolicyTest {
         assertTrue(policy.maxBarWidth.value > 340f)
         assertTrue(policy.horizontalPadding.value < 26f)
         assertTrue(perItemWidth.value >= 52f)
-    }
-
-    @Test
-    fun `android native md3e bottom bar tuning uses expressive container and indicator`() {
-        val material3 = resolveAndroidNativeBottomBarTuning(
-            blurEnabled = false,
-            darkTheme = false,
-            androidNativeVariant = AndroidNativeVariant.MATERIAL3
-        )
-        val expressive = resolveAndroidNativeBottomBarTuning(
-            blurEnabled = false,
-            darkTheme = false,
-            androidNativeVariant = AndroidNativeVariant.MATERIAL3_EXPRESSIVE
-        )
-
-        assertTrue(expressive.cornerRadiusDp > material3.cornerRadiusDp)
-        assertTrue(expressive.outerHorizontalPaddingDp > material3.outerHorizontalPaddingDp)
-        assertTrue(expressive.indicatorHeightDp > material3.indicatorHeightDp)
-        assertTrue(expressive.indicatorLensRadiusDp > material3.indicatorLensRadiusDp)
     }
 
     @Test
@@ -87,6 +67,25 @@ class BottomBarLayoutPolicyTest {
     }
 
     @Test
+    fun `kernelsu item slot width matches indicator geometry on crowded phones`() {
+        val slotWidth = resolveKernelSuBottomBarItemSlotWidth(
+            dockWidth = 353.dp,
+            horizontalPadding = 4.dp,
+            itemCount = 5
+        )
+
+        assertEquals(69.dp, slotWidth)
+        assertEquals(
+            314.5.dp,
+            resolveKernelSuBottomBarItemCenterX(
+                itemIndex = 4,
+                itemWidth = slotWidth,
+                horizontalPadding = 4.dp
+            )
+        )
+    }
+
+    @Test
     fun `kernelsu search entry shares safe floating width while collapsed`() {
         val layout = resolveKernelSuBottomBarSearchLayout(
             containerWidth = 393.dp,
@@ -122,7 +121,7 @@ class BottomBarLayoutPolicyTest {
         assertEquals(64.dp, resolveKernelSuBottomBarDockHeight(searchExpanded = false))
         assertEquals(resolveKernelSuBottomBarSearchCircleSize(), resolveKernelSuBottomBarDockHeight(searchExpanded = true))
         assertEquals(64.dp, resolveKernelSuBottomBarSearchHeight(searchExpanded = false))
-        assertEquals(58.dp, resolveKernelSuBottomBarSearchHeight(searchExpanded = true))
+        assertEquals(64.dp, resolveKernelSuBottomBarSearchHeight(searchExpanded = true))
     }
 
     @Test
@@ -180,6 +179,46 @@ class BottomBarLayoutPolicyTest {
                 bottomBarSearchEnabled = false,
                 autoExpandMode = BottomBarSearchAutoExpandMode.EXPAND_AT_HOME_TOP,
                 homeScrollOffsetPx = 0f
+            )
+        )
+    }
+
+    @Test
+    fun `bottom search auto expansion follows threshold bucket not raw scroll pixels`() {
+        assertEquals(
+            true,
+            shouldAutoExpandBottomBarSearchAtThreshold(
+                currentItem = BottomNavItem.HOME,
+                bottomBarSearchEnabled = true,
+                autoExpandMode = BottomBarSearchAutoExpandMode.EXPAND_AT_HOME_TOP,
+                isPastTopThreshold = false
+            )
+        )
+        assertEquals(
+            true,
+            shouldAutoExpandBottomBarSearchAtThreshold(
+                currentItem = BottomNavItem.HOME,
+                bottomBarSearchEnabled = true,
+                autoExpandMode = BottomBarSearchAutoExpandMode.EXPAND_WHEN_SCROLLING_DOWN,
+                isPastTopThreshold = true
+            )
+        )
+        assertEquals(
+            false,
+            shouldAutoExpandBottomBarSearchAtThreshold(
+                currentItem = BottomNavItem.HOME,
+                bottomBarSearchEnabled = true,
+                autoExpandMode = BottomBarSearchAutoExpandMode.EXPAND_AT_HOME_TOP,
+                isPastTopThreshold = true
+            )
+        )
+        assertEquals(
+            false,
+            shouldAutoExpandBottomBarSearchAtThreshold(
+                currentItem = BottomNavItem.HOME,
+                bottomBarSearchEnabled = true,
+                autoExpandMode = BottomBarSearchAutoExpandMode.DISABLED,
+                isPastTopThreshold = false
             )
         )
     }
@@ -280,6 +319,127 @@ class BottomBarLayoutPolicyTest {
                 bottomBarSearchEnabled = true,
                 shouldAutoExpand = true,
                 expansionOverride = BottomBarSearchExpansionOverride.COLLAPSED
+            )
+        )
+    }
+
+    @Test
+    fun `bottom search override reset only follows route enabled state and threshold bucket`() {
+        assertEquals(
+            false,
+            shouldResetBottomBarSearchExpansionOverride(
+                currentItem = BottomNavItem.HOME,
+                bottomBarSearchEnabled = true,
+                shouldAutoExpand = true,
+                isPastTopThreshold = false
+            )
+        )
+        assertEquals(
+            true,
+            shouldResetBottomBarSearchExpansionOverride(
+                currentItem = BottomNavItem.HOME,
+                bottomBarSearchEnabled = true,
+                shouldAutoExpand = false,
+                isPastTopThreshold = true
+            )
+        )
+        assertEquals(
+            true,
+            shouldResetBottomBarSearchExpansionOverride(
+                currentItem = BottomNavItem.DYNAMIC,
+                bottomBarSearchEnabled = true,
+                shouldAutoExpand = false,
+                isPastTopThreshold = false
+            )
+        )
+    }
+
+    @Test
+    fun `bottom bar search performance guards keep expensive layers transient`() {
+        assertEquals(
+            false,
+            shouldRenderBottomBarRefractionCapture(
+                glassEnabled = true,
+                hasBackdrop = true,
+                captureProgress = 0.01f,
+                isFeedScrollInProgress = false
+            )
+        )
+        assertEquals(
+            true,
+            shouldRenderBottomBarRefractionCapture(
+                glassEnabled = true,
+                hasBackdrop = true,
+                captureProgress = 0.01f,
+                isFeedScrollInProgress = false,
+                isBottomBarInteractionActive = true
+            )
+        )
+        assertEquals(
+            false,
+            shouldRenderBottomBarRefractionCapture(
+                glassEnabled = true,
+                hasBackdrop = true,
+                captureProgress = 0.001f,
+                isFeedScrollInProgress = false
+            )
+        )
+        assertEquals(
+            false,
+            shouldRenderBottomBarRefractionCapture(
+                glassEnabled = false,
+                hasBackdrop = true,
+                captureProgress = 0.3f,
+                isFeedScrollInProgress = false
+            )
+        )
+        assertEquals(
+            true,
+            shouldComposeBottomBarDockContent(
+                dockContentAlpha = 0.02f,
+                effectiveSearchExpanded = true
+            )
+        )
+        assertEquals(
+            false,
+            shouldComposeBottomBarDockContent(
+                dockContentAlpha = 0f,
+                effectiveSearchExpanded = true
+            )
+        )
+        assertEquals(
+            true,
+            shouldComposeBottomBarDockContent(
+                dockContentAlpha = 0f,
+                effectiveSearchExpanded = false
+            )
+        )
+    }
+
+    @Test
+    fun `feed scrolling skips idle bottom bar refraction capture`() {
+        assertEquals(
+            false,
+            shouldRenderBottomBarRefractionCapture(
+                glassEnabled = true,
+                hasBackdrop = true,
+                captureProgress = 0.01f,
+                isFeedScrollInProgress = true,
+                isBottomBarInteractionActive = false
+            )
+        )
+    }
+
+    @Test
+    fun `feed scrolling keeps bottom bar refraction capture during direct interaction`() {
+        assertEquals(
+            true,
+            shouldRenderBottomBarRefractionCapture(
+                glassEnabled = true,
+                hasBackdrop = true,
+                captureProgress = 0.01f,
+                isFeedScrollInProgress = true,
+                isBottomBarInteractionActive = true
             )
         )
     }

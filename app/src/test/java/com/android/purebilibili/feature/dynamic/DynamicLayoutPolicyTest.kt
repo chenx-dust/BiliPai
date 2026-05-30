@@ -61,6 +61,20 @@ class DynamicLayoutPolicyTest {
     }
 
     @Test
+    fun `dynamic sidebar return header aligns with top tab row height`() {
+        assertEquals(52, resolveDynamicTopBarHeightDp())
+        assertEquals(resolveDynamicTopBarHeightDp(), resolveDynamicSidebarReturnHeaderHeightDp())
+    }
+
+    @Test
+    fun `dynamic sidebar divider starts below top chrome`() {
+        assertEquals(
+            76.dp,
+            resolveDynamicSidebarDividerTopOffset(topPadding = 24.dp)
+        )
+    }
+
+    @Test
     fun `dynamic sidebar trims width without crowding avatar affordances`() {
         assertEquals(68.dp, resolveDynamicSidebarWidth(isExpanded = true))
         assertEquals(60.dp, resolveDynamicSidebarWidth(isExpanded = false))
@@ -86,6 +100,22 @@ class DynamicLayoutPolicyTest {
     @Test
     fun `dynamic action row uses equal slots so like button is not starved by earlier labels`() {
         assertEquals(1f, resolveDynamicActionButtonSlotWeight(), 0f)
-        assertEquals(12.dp, resolveDynamicActionButtonSpacing())
+        assertEquals(8.dp, resolveDynamicActionButtonSpacing())
+    }
+
+    @Test
+    fun `dynamic action text keeps comment count when slot is narrow`() {
+        assertEquals(
+            "评论 1.2k",
+            resolveDynamicActionButtonText(label = "评论", count = 1200, slotWidthDp = 96)
+        )
+        assertEquals(
+            "转发",
+            resolveDynamicActionButtonText(label = "转发", count = 34000, slotWidthDp = 96)
+        )
+        assertEquals(
+            "评论 1.2k",
+            resolveDynamicActionButtonText(label = "评论", count = 1200, slotWidthDp = 140)
+        )
     }
 }

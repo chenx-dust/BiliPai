@@ -139,6 +139,106 @@ class VideoPlayerSectionPolicyTest {
     }
 
     @Test
+    fun systemStreamVolumeFromGesture_increasesOnUpwardDrag() {
+        assertEquals(
+            9,
+            resolveSystemStreamVolumeFromGesture(
+                startVolumeStep = 5,
+                maxVolumeStep = 15,
+                totalDragDistanceY = -300f,
+                screenHeightPx = 1_200f,
+                gestureSensitivity = 1.0f
+            )
+        )
+    }
+
+    @Test
+    fun systemStreamVolumeFromGesture_decreasesOnDownwardDrag() {
+        assertEquals(
+            2,
+            resolveSystemStreamVolumeFromGesture(
+                startVolumeStep = 5,
+                maxVolumeStep = 15,
+                totalDragDistanceY = 240f,
+                screenHeightPx = 1_200f,
+                gestureSensitivity = 1.0f
+            )
+        )
+    }
+
+    @Test
+    fun systemStreamVolumeFromGesture_clampsToSystemRange() {
+        assertEquals(
+            15,
+            resolveSystemStreamVolumeFromGesture(
+                startVolumeStep = 14,
+                maxVolumeStep = 15,
+                totalDragDistanceY = -1_200f,
+                screenHeightPx = 1_200f,
+                gestureSensitivity = 2.0f
+            )
+        )
+        assertEquals(
+            0,
+            resolveSystemStreamVolumeFromGesture(
+                startVolumeStep = 1,
+                maxVolumeStep = 15,
+                totalDragDistanceY = 1_200f,
+                screenHeightPx = 1_200f,
+                gestureSensitivity = 2.0f
+            )
+        )
+    }
+
+    @Test
+    fun systemStreamVolumeFromGesture_returnsZeroForInvalidSystemRange() {
+        assertEquals(
+            0,
+            resolveSystemStreamVolumeFromGesture(
+                startVolumeStep = 5,
+                maxVolumeStep = 0,
+                totalDragDistanceY = -300f,
+                screenHeightPx = 1_200f,
+                gestureSensitivity = 1.0f
+            )
+        )
+    }
+
+    @Test
+    fun pinchExitFullscreen_onlyTriggersForInwardPinchWithoutConflictingGestures() {
+        assertTrue(
+            shouldTriggerPinchExitFullscreen(
+                isFullscreen = true,
+                isScreenLocked = false,
+                twoFingerSpeedAxisLocked = false,
+                currentViewportScale = 1.0f,
+                cumulativeZoom = 0.78f,
+                minExitZoom = 0.82f
+            )
+        )
+        assertFalse(
+            shouldTriggerPinchExitFullscreen(
+                isFullscreen = true,
+                isScreenLocked = false,
+                twoFingerSpeedAxisLocked = true,
+                currentViewportScale = 1.0f,
+                cumulativeZoom = 0.78f,
+                minExitZoom = 0.82f
+            )
+        )
+        assertFalse(
+            shouldTriggerPinchExitFullscreen(
+                isFullscreen = true,
+                isScreenLocked = false,
+                twoFingerSpeedAxisLocked = false,
+                currentViewportScale = 1.4f,
+                cumulativeZoom = 0.78f,
+                minExitZoom = 0.82f
+            )
+        )
+    }
+
+    @Test
     fun keepScreenAwake_onlyWhilePlaybackIsActiveOrStarting() {
         assertTrue(
             shouldKeepVideoPlaybackAwake(
@@ -658,7 +758,7 @@ class VideoPlayerSectionPolicyTest {
 
         assertEquals(PlaybackParameters(1.0f, 1.0f), decision.originalPlaybackParameters)
         assertEquals(PlaybackParameters(2.0f, 1.0f), decision.targetPlaybackParameters)
-        assertTrue(decision.clearExistingLock)
+        assertFalse(decision.clearExistingLock)
     }
 
     @Test
@@ -714,10 +814,25 @@ class VideoPlayerSectionPolicyTest {
     }
 
     @Test
-    fun playbackReadyAutoFullscreen_disabledForTabletsEvenWhenUsingCompactLayout() {
-        assertFalse(
+    fun playbackReadyAutoFullscreen_allowsTabletsBecauseSettingIsExplicit() {
+        assertTrue(
             shouldAllowPlaybackStateAutoFullscreen(
                 smallestScreenWidthDp = 600
+            )
+        )
+    }
+
+    @Test
+    fun playbackStateAutoFullscreen_triggersWhenAttachedAfterPlaybackAlreadyStarted() {
+        assertTrue(
+            shouldToggleAutoFullscreenForCurrentPlaybackSnapshot(
+                autoEnterFullscreenEnabled = true,
+                autoExitFullscreenEnabled = true,
+                allowPlaybackStateAutoFullscreen = true,
+                playbackState = Player.STATE_READY,
+                playWhenReady = true,
+                hasAutoEnteredFullscreen = false,
+                isFullscreen = false
             )
         )
     }
@@ -855,6 +970,7 @@ class VideoPlayerSectionPolicyTest {
     fun longPressSpeedLock_triggersOnlyInTopOrBottomTargetZone() {
         assertTrue(
             shouldLockLongPressSpeedInTargetZone(
+                longPressSpeedLockEnabled = true,
                 isLongPressing = true,
                 alreadyLocked = false,
                 currentPointerY = 72f,
@@ -864,9 +980,20 @@ class VideoPlayerSectionPolicyTest {
         )
         assertTrue(
             shouldLockLongPressSpeedInTargetZone(
+                longPressSpeedLockEnabled = true,
                 isLongPressing = true,
                 alreadyLocked = false,
                 currentPointerY = 928f,
+                containerHeightPx = 1_000f,
+                lockZoneHeightPx = 120f
+            )
+        )
+        assertFalse(
+            shouldLockLongPressSpeedInTargetZone(
+                longPressSpeedLockEnabled = false,
+                isLongPressing = true,
+                alreadyLocked = false,
+                currentPointerY = 72f,
                 containerHeightPx = 1_000f,
                 lockZoneHeightPx = 120f
             )
@@ -958,6 +1085,49 @@ class VideoPlayerSectionPolicyTest {
     }
 
     @Test
+    fun longPressSpeedFeedback_usesLightweightTextAndNoDefaultLockInstruction() {
+        val source = loadVideoPlayerSectionSource()
+
+        assertTrue(source.contains("\"倍速播放中 ${'$'}{effectiveLongPressSpeed}x\""))
+        assertFalse(source.contains("拖至上下区域锁定"))
+        assertFalse(source.contains("rememberInfiniteTransition(label = \"fast_forward\")"))
+    }
+
+    @Test
+    fun longPressSpeedLockHint_usesNonModalPromptActions() {
+        val source = loadVideoPlayerSectionSource()
+
+        assertTrue(source.contains("需要长按锁定倍速吗？"))
+        assertTrue(source.contains("开启锁定"))
+        assertTrue(source.contains("不再提示"))
+        assertFalse(source.contains("AlertDialog"))
+    }
+
+    @Test
+    fun longPressSpeedLockHint_dismissActionEndsCurrentLongPressSpeed() {
+        val source = loadVideoPlayerSectionSource()
+        val dismissAction = source
+            .substringAfter("TextButton(\n                            onClick = {\n                                showLongPressSpeedLockHint = false")
+            .substringBefore("Text(\"不再提示\")")
+
+        assertTrue(dismissAction.contains("finishLongPressSpeedGesture(gestureEnded = true)"))
+    }
+
+    @Test
+    fun longPressSpeedLockHint_promptActionsMarkLocalHintAsShownImmediately() {
+        val source = loadVideoPlayerSectionSource()
+        val hintPrompt = source
+            .substringAfter("text = \"需要长按锁定倍速吗？\"")
+            .substringBefore("Text(\"不再提示\")")
+        val dismissAction = source
+            .substringAfter("TextButton(\n                            onClick = {\n                                showLongPressSpeedLockHint = false")
+            .substringBefore("Text(\"不再提示\")")
+
+        assertTrue(hintPrompt.contains("hasShownLongPressSpeedLockHintLocally = true"))
+        assertTrue(dismissAction.contains("hasShownLongPressSpeedLockHintLocally = true"))
+    }
+
+    @Test
     fun longPressSpeedDrag_usesSingleLongPressDragGestureDetector() {
         val source = loadVideoPlayerSectionSource()
 
@@ -989,6 +1159,58 @@ class VideoPlayerSectionPolicyTest {
             shouldConsumeExclusiveLongPressSpeedDrag(
                 isLongPressing = false,
                 longPressSpeedLocked = false
+            )
+        )
+    }
+
+    @Test
+    fun lockedLongPressSpeedUnlock_requiresRightSideHoldAndDownwardDrag() {
+        assertTrue(
+            shouldUnlockLockedLongPressSpeedFromRightDownDrag(
+                longPressSpeedLocked = true,
+                isLongPressing = true,
+                startX = 720f,
+                startY = 300f,
+                currentY = 380f,
+                containerWidthPx = 1_000f,
+                holdDurationMs = 1_100L,
+                minDownDragPx = 56f
+            )
+        )
+        assertFalse(
+            shouldUnlockLockedLongPressSpeedFromRightDownDrag(
+                longPressSpeedLocked = true,
+                isLongPressing = true,
+                startX = 420f,
+                startY = 300f,
+                currentY = 380f,
+                containerWidthPx = 1_000f,
+                holdDurationMs = 1_100L,
+                minDownDragPx = 56f
+            )
+        )
+        assertFalse(
+            shouldUnlockLockedLongPressSpeedFromRightDownDrag(
+                longPressSpeedLocked = true,
+                isLongPressing = true,
+                startX = 720f,
+                startY = 300f,
+                currentY = 340f,
+                containerWidthPx = 1_000f,
+                holdDurationMs = 1_100L,
+                minDownDragPx = 56f
+            )
+        )
+        assertFalse(
+            shouldUnlockLockedLongPressSpeedFromRightDownDrag(
+                longPressSpeedLocked = true,
+                isLongPressing = true,
+                startX = 720f,
+                startY = 300f,
+                currentY = 380f,
+                containerWidthPx = 1_000f,
+                holdDurationMs = 900L,
+                minDownDragPx = 56f
             )
         )
     }

@@ -15,6 +15,7 @@ import androidx.compose.material.icons.filled.Clear
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -31,6 +32,10 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.hapticfeedback.HapticFeedback
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -54,8 +59,7 @@ import com.android.purebilibili.core.theme.iOSRed
 import com.android.purebilibili.core.theme.iOSSystemGray
 import com.android.purebilibili.core.theme.iOSTeal
 import com.android.purebilibili.core.theme.iOSYellow
-import com.android.purebilibili.core.theme.isMaterial3ExpressiveVariant
-import com.android.purebilibili.core.theme.resolveAndroidNativeChromeTokens
+import com.android.purebilibili.core.store.SettingsManager
 import com.android.purebilibili.core.ui.LocalGlobalWallpaperBackdropVisible
 import com.android.purebilibili.core.ui.common.copyOnLongPress
 import io.github.alexzhirkevich.cupertino.CupertinoSwitch
@@ -64,8 +68,18 @@ import io.github.alexzhirkevich.cupertino.icons.CupertinoIcons
 import io.github.alexzhirkevich.cupertino.icons.filled.*
 import io.github.alexzhirkevich.cupertino.icons.outlined.*
 import top.yukonga.miuix.kmp.basic.BasicComponent
+import top.yukonga.miuix.kmp.basic.BasicComponentDefaults
+import top.yukonga.miuix.kmp.basic.Card as MiuixCard
+import top.yukonga.miuix.kmp.basic.CardDefaults as MiuixCardDefaults
+import top.yukonga.miuix.kmp.basic.Switch as MiuixSwitch
+import top.yukonga.miuix.kmp.preference.ArrowPreference as MiuixArrowPreference
+import top.yukonga.miuix.kmp.preference.SwitchPreference as MiuixSwitchPreference
 import top.yukonga.miuix.kmp.theme.MiuixTheme
 import kotlin.math.max
+
+private object NoOpHapticFeedback : HapticFeedback {
+    override fun performHapticFeedback(hapticFeedbackType: HapticFeedbackType) = Unit
+}
 
 // ═══════════════════════════════════════════════════
 //  Common iOS List Components (Reused across Settings, Profile, etc.)
@@ -106,23 +120,7 @@ internal fun resolveAdaptiveListComponentVisualSpec(
     uiPreset: UiPreset,
     androidNativeVariant: AndroidNativeVariant = AndroidNativeVariant.MATERIAL3
 ): AdaptiveListComponentVisualSpec {
-    return if (isMaterial3ExpressiveVariant(uiPreset, androidNativeVariant)) {
-        val chromeTokens = resolveAndroidNativeChromeTokens(uiPreset, androidNativeVariant)
-        AdaptiveListComponentVisualSpec(
-            sectionStartPaddingDp = 22,
-            groupCornerRadiusDp = chromeTokens.containerCornerRadiusDp,
-            groupTonalElevationDp = chromeTokens.tonalSurfaceElevationDp,
-            iconCornerRadiusDp = 14,
-            iconContainerSizeDp = 42,
-            iconGlyphSizeDp = 22,
-            iconBackgroundAlpha = 0.18f,
-            gridCornerRadiusDp = chromeTokens.containerCornerRadiusDp,
-            searchBarCornerRadiusDp = chromeTokens.pillCornerRadiusDp,
-            searchBarHeightDp = 58,
-            dividerThicknessDp = 0f,
-            dividerStartIndentDp = 22
-        )
-    } else if (uiPreset == UiPreset.MD3 && androidNativeVariant == AndroidNativeVariant.MIUIX) {
+    return if (uiPreset == UiPreset.MD3 && androidNativeVariant == AndroidNativeVariant.MIUIX) {
         AdaptiveListComponentVisualSpec(
             sectionStartPaddingDp = 18,
             groupCornerRadiusDp = 20,
@@ -174,14 +172,7 @@ internal fun resolveAdaptiveListRowVisualSpec(
     uiPreset: UiPreset,
     androidNativeVariant: AndroidNativeVariant = AndroidNativeVariant.MATERIAL3
 ): AdaptiveListRowVisualSpec {
-    return if (isMaterial3ExpressiveVariant(uiPreset, androidNativeVariant)) {
-        AdaptiveListRowVisualSpec(
-            insideHorizontalPaddingDp = 20,
-            insideVerticalPaddingDp = 18,
-            trailingIconSizeDp = 18,
-            trailingSpacingDp = 8
-        )
-    } else if (uiPreset == UiPreset.MD3 && androidNativeVariant == AndroidNativeVariant.MIUIX) {
+    return if (uiPreset == UiPreset.MD3 && androidNativeVariant == AndroidNativeVariant.MIUIX) {
         AdaptiveListRowVisualSpec(
             insideHorizontalPaddingDp = 16,
             insideVerticalPaddingDp = 14,
@@ -214,7 +205,6 @@ internal fun resolveAdaptiveGroupContainerColor(
 ): Color {
     val resolvedColor = if (uiPreset == UiPreset.MD3) {
         when {
-            isMaterial3ExpressiveVariant(uiPreset, androidNativeVariant) -> colorScheme.surfaceContainerHigh
             androidNativeVariant == AndroidNativeVariant.MIUIX -> colorScheme.surfaceContainer
             else -> colorScheme.surfaceContainerLow
         }
@@ -238,7 +228,6 @@ internal fun resolveAdaptiveSearchBarContainerColor(
 ): Color {
     val resolvedColor = if (uiPreset == UiPreset.MD3) {
         when {
-            isMaterial3ExpressiveVariant(uiPreset, androidNativeVariant) -> colorScheme.surfaceContainerHigh
             androidNativeVariant == AndroidNativeVariant.MIUIX -> colorScheme.surfaceContainer
             else -> colorScheme.surfaceContainerHigh
         }
@@ -364,6 +353,7 @@ fun AppAdaptiveSwitch(
     enabled: Boolean = true
 ) {
     val uiPreset = LocalUiPreset.current
+    val androidNativeVariant = LocalAndroidNativeVariant.current
     val settingsLiquidGlassEnabled = LocalSettingsLiquidGlassEnabled.current
     val colorScheme = MaterialTheme.colorScheme
     val switchSpec = remember(uiPreset, colorScheme) {
@@ -375,6 +365,7 @@ fun AppAdaptiveSwitch(
     when (
         resolveAppAdaptiveSwitchTreatment(
             uiPreset = uiPreset,
+            androidNativeVariant = androidNativeVariant,
             settingsLiquidGlassEnabled = settingsLiquidGlassEnabled
         )
     ) {
@@ -402,6 +393,14 @@ fun AppAdaptiveSwitch(
                     )
                 )
             }
+        }
+        AppAdaptiveSwitchTreatment.MIUIX -> {
+            MiuixSwitch(
+                checked = checked,
+                onCheckedChange = onCheckedChange,
+                enabled = enabled,
+                modifier = modifier
+            )
         }
         AppAdaptiveSwitchTreatment.CUPERTINO -> {
             CupertinoSwitch(
@@ -606,6 +605,18 @@ fun IOSGroup(
         androidNativeVariant = androidNativeVariant,
         globalWallpaperVisible = LocalGlobalWallpaperBackdropVisible.current
     )
+
+    if (uiPreset == UiPreset.MD3 && androidNativeVariant == AndroidNativeVariant.MIUIX) {
+        MiuixCard(
+            modifier = modifier.padding(horizontal = 14.dp),
+            cornerRadius = visualSpec.groupCornerRadiusDp.dp,
+            insideMargin = PaddingValues(0.dp),
+            colors = MiuixCardDefaults.defaultColors(color = resolvedContainerColor)
+        ) {
+            content()
+        }
+        return
+    }
     
     Surface(
         modifier = modifier
@@ -622,9 +633,7 @@ fun IOSGroup(
         shape = appliedShape,
         color = resolvedContainerColor,
         shadowElevation = if (uiPreset == UiPreset.MD3) 0.dp else 0.dp,
-        tonalElevation = if (isMaterial3ExpressiveVariant(uiPreset, androidNativeVariant)) {
-            visualSpec.groupTonalElevationDp.dp
-        } else if (uiPreset == UiPreset.MD3) {
+        tonalElevation = if (uiPreset == UiPreset.MD3) {
             0.dp
         } else {
             visualSpec.groupTonalElevationDp.dp
@@ -633,7 +642,6 @@ fun IOSGroup(
             androidx.compose.foundation.BorderStroke(
                 0.8.dp,
                 when {
-                    isMaterial3ExpressiveVariant(uiPreset, androidNativeVariant) -> colorScheme.outlineVariant.copy(alpha = 0.36f)
                     androidNativeVariant == AndroidNativeVariant.MIUIX -> colorScheme.outline.copy(alpha = 0.22f)
                     else -> colorScheme.outlineVariant.copy(alpha = 0.6f)
                 }
@@ -669,42 +677,92 @@ fun IOSSwitchItem(
     val effectiveIconTint = rememberAdaptiveSemanticIconTint(iconTint, uiPreset)
     val cornerRadiusScale = LocalCornerRadiusScale.current
     val iconCornerRadius = if (uiPreset == UiPreset.MD3) visualSpec.iconCornerRadiusDp.dp else iOSCornerRadius.Small * cornerRadiusScale
-    if (uiPreset == UiPreset.MD3) {
-        BasicComponent(
-            title = title,
-            summary = subtitle,
-            enabled = enabled,
-            onClick = { onCheckedChange(!checked) },
-            insideMargin = PaddingValues(
-                horizontal = rowSpec.insideHorizontalPaddingDp.dp,
-                vertical = rowSpec.insideVerticalPaddingDp.dp
-            ),
-            startAction = {
-                if (icon != null) {
-                    Box(
-                        modifier = Modifier
-                            .size(visualSpec.iconContainerSizeDp.dp)
-                            .clip(RoundedCornerShape(visualSpec.iconCornerRadiusDp.dp))
-                            .background(effectiveIconTint.copy(alpha = visualSpec.iconBackgroundAlpha)),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        Icon(
-                            imageVector = icon,
-                            contentDescription = null,
-                            tint = effectiveIconTint,
-                            modifier = Modifier.size(visualSpec.iconGlyphSizeDp.dp)
-                        )
+    if (uiPreset == UiPreset.MD3 && androidNativeVariant == AndroidNativeVariant.MIUIX) {
+        val context = LocalContext.current
+        val platformHaptic = LocalHapticFeedback.current
+        val effectiveHaptic = if (SettingsManager.isHapticFeedbackEnabledSync(context)) {
+            platformHaptic
+        } else {
+            NoOpHapticFeedback
+        }
+        CompositionLocalProvider(LocalHapticFeedback provides effectiveHaptic) {
+            MiuixSwitchPreference(
+                checked = checked,
+                onCheckedChange = onCheckedChange,
+                title = title,
+                titleColor = BasicComponentDefaults.titleColor(color = textColor),
+                summary = subtitle,
+                summaryColor = BasicComponentDefaults.summaryColor(color = subtitleColor),
+                enabled = enabled,
+                insideMargin = PaddingValues(
+                    horizontal = rowSpec.insideHorizontalPaddingDp.dp,
+                    vertical = rowSpec.insideVerticalPaddingDp.dp
+                ),
+                startAction = {
+                    if (icon != null) {
+                        Box(
+                            modifier = Modifier
+                                .size(visualSpec.iconContainerSizeDp.dp)
+                                .clip(RoundedCornerShape(visualSpec.iconCornerRadiusDp.dp))
+                                .background(effectiveIconTint.copy(alpha = visualSpec.iconBackgroundAlpha)),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Icon(
+                                imageVector = icon,
+                                contentDescription = null,
+                                tint = effectiveIconTint,
+                                modifier = Modifier.size(visualSpec.iconGlyphSizeDp.dp)
+                            )
+                        }
                     }
                 }
-            },
-            endActions = {
-                AppAdaptiveSwitch(
-                    checked = checked,
-                    onCheckedChange = onCheckedChange,
-                    enabled = enabled
-                )
+            )
+        }
+        return
+    }
+    if (uiPreset == UiPreset.MD3) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .alpha(if (enabled) 1f else 0.6f)
+                .clickable(enabled = enabled) { onCheckedChange(!checked) }
+                .padding(
+                    horizontal = rowSpec.insideHorizontalPaddingDp.dp,
+                    vertical = rowSpec.insideVerticalPaddingDp.dp
+                ),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            if (icon != null) {
+                Box(
+                    modifier = Modifier
+                        .size(visualSpec.iconContainerSizeDp.dp)
+                        .clip(RoundedCornerShape(visualSpec.iconCornerRadiusDp.dp))
+                        .background(effectiveIconTint.copy(alpha = visualSpec.iconBackgroundAlpha)),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Icon(
+                        imageVector = icon,
+                        contentDescription = null,
+                        tint = effectiveIconTint,
+                        modifier = Modifier.size(visualSpec.iconGlyphSizeDp.dp)
+                    )
+                }
+                Spacer(modifier = Modifier.width(14.dp))
             }
-        )
+            Column(modifier = Modifier.weight(1f)) {
+                Text(text = title, style = MaterialTheme.typography.bodyLarge, color = textColor)
+                if (subtitle != null) {
+                    Spacer(modifier = Modifier.height(2.dp))
+                    Text(text = subtitle, style = MaterialTheme.typography.bodySmall, color = subtitleColor)
+                }
+            }
+            Spacer(modifier = Modifier.width(rowSpec.trailingSpacingDp.dp))
+            AppAdaptiveSwitch(
+                checked = checked,
+                onCheckedChange = onCheckedChange,
+                enabled = enabled
+            )
+        }
         return
     }
 
@@ -740,6 +798,7 @@ fun IOSSwitchItem(
                 Text(text = subtitle, style = MaterialTheme.typography.bodySmall, color = subtitleColor)
             }
         }
+        Spacer(modifier = Modifier.width(rowSpec.trailingSpacingDp.dp))
         AppAdaptiveSwitch(
             checked = checked,
             onCheckedChange = onCheckedChange,
@@ -777,6 +836,83 @@ fun IOSClickableItem(
     val effectiveIconTint = rememberAdaptiveSemanticIconTint(iconTint, uiPreset)
     val cornerRadiusScale = LocalCornerRadiusScale.current
     val iconCornerRadius = if (uiPreset == UiPreset.MD3) visualSpec.iconCornerRadiusDp.dp else iOSCornerRadius.Small * cornerRadiusScale
+    if (
+        uiPreset == UiPreset.MD3 &&
+        androidNativeVariant == AndroidNativeVariant.MIUIX &&
+        onClick != null &&
+        showChevron &&
+        !centered
+    ) {
+        MiuixArrowPreference(
+            title = title,
+            titleColor = BasicComponentDefaults.titleColor(color = textColor),
+            summary = subtitle,
+            summaryColor = BasicComponentDefaults.summaryColor(color = subtitleColor),
+            onClick = onClick,
+            insideMargin = PaddingValues(
+                horizontal = rowSpec.insideHorizontalPaddingDp.dp,
+                vertical = rowSpec.insideVerticalPaddingDp.dp
+            ),
+            startAction = {
+                when {
+                    icon != null -> {
+                        Box(
+                            modifier = Modifier
+                                .size(visualSpec.iconContainerSizeDp.dp)
+                                .clip(RoundedCornerShape(visualSpec.iconCornerRadiusDp.dp))
+                                .background(effectiveIconTint.copy(alpha = visualSpec.iconBackgroundAlpha)),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Icon(
+                                imageVector = icon,
+                                contentDescription = null,
+                                tint = effectiveIconTint,
+                                modifier = Modifier.size(visualSpec.iconGlyphSizeDp.dp)
+                            )
+                        }
+                    }
+
+                    iconPainter != null -> {
+                        Box(
+                            modifier = Modifier
+                                .size(visualSpec.iconContainerSizeDp.dp)
+                                .clip(RoundedCornerShape(visualSpec.iconCornerRadiusDp.dp))
+                                .background(
+                                    if (effectiveIconTint == Color.Unspecified) {
+                                        Color.Transparent
+                                    } else {
+                                        effectiveIconTint.copy(alpha = visualSpec.iconBackgroundAlpha)
+                                    }
+                                ),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Icon(
+                                painter = iconPainter,
+                                contentDescription = null,
+                                tint = effectiveIconTint,
+                                modifier = Modifier.size(visualSpec.iconGlyphSizeDp.dp)
+                            )
+                        }
+                    }
+                }
+            },
+            endActions = {
+                if (!value.isNullOrBlank()) {
+                    Text(
+                        text = value,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = valueColor,
+                        modifier = if (enableCopy) {
+                            Modifier.copyOnLongPress(copyValue ?: value, title)
+                        } else {
+                            Modifier
+                        }
+                    )
+                }
+            }
+        )
+        return
+    }
     if (uiPreset == UiPreset.MD3) {
         BasicComponent(
             title = title,

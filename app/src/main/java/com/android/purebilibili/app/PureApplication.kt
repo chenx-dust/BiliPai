@@ -39,7 +39,10 @@ import com.android.purebilibili.feature.plugin.AdFilterPlugin
 import com.android.purebilibili.feature.plugin.CdnRegionPlugin
 import com.android.purebilibili.feature.plugin.DanmakuEnhancePlugin
 import com.android.purebilibili.feature.plugin.EyeProtectionPlugin
+import com.android.purebilibili.feature.plugin.HomeFeedAnonymizerPlugin
 import com.android.purebilibili.feature.plugin.SponsorBlockPlugin
+import com.android.purebilibili.feature.plugin.dlna.DlnaCastPlugin
+import com.android.purebilibili.feature.plugin.googlecast.GoogleCastPlugin
 import com.android.purebilibili.feature.plugin.TodayWatchPlugin
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.runBlocking
@@ -101,6 +104,7 @@ class PureApplication : Application(), ImageLoaderFactory, ComponentCallbacks2 {
         
         super.onCreate()
         Logger.init(this)
+        CrashReporter.installGlobalExceptionHandler()
 
         // 启动即确保首页视觉默认值生效：底栏悬浮 + 液态玻璃 + 顶部模糊
         // 冷启动路径不阻塞主线程，迁移改为后台执行。
@@ -153,7 +157,10 @@ class PureApplication : Application(), ImageLoaderFactory, ComponentCallbacks2 {
         PluginManager.register(EyeProtectionPlugin())
         PluginManager.register(TodayWatchPlugin())
         PluginManager.register(CdnRegionPlugin())
-        Logger.d(PureApplicationRuntimeConfig.TAG, " Plugin system initialized with 6 built-in plugins")
+        PluginManager.register(HomeFeedAnonymizerPlugin())
+        PluginManager.register(DlnaCastPlugin())
+        PluginManager.register(GoogleCastPlugin())
+        Logger.d(PureApplicationRuntimeConfig.TAG, " Plugin system initialized with 9 built-in plugins")
 
         com.android.purebilibili.core.plugin.json.JsonPluginManager.initialize(this)
         Logger.d(PureApplicationRuntimeConfig.TAG, " JSON plugin system initialized")
@@ -248,6 +255,7 @@ class PureApplication : Application(), ImageLoaderFactory, ComponentCallbacks2 {
                 )
                 // 记录应用打开事件
                 AnalyticsHelper.logAppOpen()
+                AnalyticsHelper.logDailyActive(source = "app_start")
             }
             
             Logger.d(PureApplicationRuntimeConfig.TAG, " Firebase Analytics initialized (enabled=$enabled)")
@@ -259,18 +267,23 @@ class PureApplication : Application(), ImageLoaderFactory, ComponentCallbacks2 {
     // � [后台内存优化] 响应系统内存警告
     override fun onTrimMemory(level: Int) {
         super.onTrimMemory(level)
-        if (PureApplicationRuntimeConfig.shouldClearImageMemoryCacheOnTrimLevel(level)) {
-            _imageLoader?.memoryCache?.clear()
-            when (level) {
-                ComponentCallbacks2.TRIM_MEMORY_UI_HIDDEN -> {
-                    Logger.d(PureApplicationRuntimeConfig.TAG, " UI hidden, released image memory cache")
+        val imageCacheTrimLevel = PureApplicationRuntimeConfig.resolveImageMemoryCacheTrimLevel(level)
+        if (imageCacheTrimLevel != null) {
+            _imageLoader?.memoryCache?.trimMemory(imageCacheTrimLevel)
+            if (level == ComponentCallbacks2.TRIM_MEMORY_UI_HIDDEN ||
+                PureApplicationRuntimeConfig.shouldClearImageMemoryCacheOnTrimLevel(level)
+            ) {
+                System.gc()
+            }
+            when {
+                PureApplicationRuntimeConfig.shouldClearImageMemoryCacheOnTrimLevel(level) -> {
+                    Logger.d(PureApplicationRuntimeConfig.TAG, "🚨 trim(level=$level), released image memory cache")
                 }
-                ComponentCallbacks2.TRIM_MEMORY_COMPLETE -> {
-                    Logger.d(PureApplicationRuntimeConfig.TAG, "🚨 TRIM_MEMORY_COMPLETE, released image memory cache")
+                level == ComponentCallbacks2.TRIM_MEMORY_UI_HIDDEN -> {
+                    Logger.d(PureApplicationRuntimeConfig.TAG, " UI hidden, trimmed image memory cache for background")
                 }
                 else -> {
-                    System.gc()
-                    Logger.d(PureApplicationRuntimeConfig.TAG, " Low memory trim(level=$level), cleared image memory cache")
+                    Logger.d(PureApplicationRuntimeConfig.TAG, " Low memory trim(level=$level), trimmed image memory cache")
                 }
             }
         }
@@ -345,6 +358,7 @@ class PureApplication : Application(), ImageLoaderFactory, ComponentCallbacks2 {
                 val currentIcon = normalizeAppIconKey(
                     SettingsManager.getAppIcon(this@PureApplication).first()
                 )
+                val splashIconVisible = SettingsManager.isSplashIconAnimationEnabledSync(this@PureApplication)
                 val cacheSynced = this@PureApplication
                     .getSharedPreferences("app_icon_cache", Context.MODE_PRIVATE)
                     .edit()
@@ -353,7 +367,11 @@ class PureApplication : Application(), ImageLoaderFactory, ComponentCallbacks2 {
                 Logger.d(PureApplicationRuntimeConfig.TAG, " Synced app icon cache from DataStore: $currentIcon (success=$cacheSynced)")
 
                 val allUniqueAliases = allManagedAppIconLauncherAliases(packageName)
-                val targetAlias = resolveAppIconLauncherAlias(packageName, currentIcon)
+                val targetAlias = resolveAppIconLauncherAlias(
+                    packageName = packageName,
+                    rawKey = currentIcon,
+                    splashIconVisible = splashIconVisible
+                )
                 
                 val targetAliasComponent = android.content.ComponentName(packageName, targetAlias)
                 val targetState = pm.getComponentEnabledSetting(targetAliasComponent)

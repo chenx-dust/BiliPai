@@ -44,8 +44,8 @@ class CommonListAppearancePolicyTest {
                 isBottomBarBlurEnabled = false,
                 isTopBarLiquidGlassEnabled = false,
                 isBottomBarLiquidGlassEnabled = false,
-                showHomeCoverGlassBadges = false,
-                showHomeInfoGlassBadges = false
+                showHomeCoverGlassBadges = true,
+                showHomeInfoGlassBadges = true
             ),
             uiPreset = UiPreset.MD3
         )
@@ -88,8 +88,8 @@ class CommonListAppearancePolicyTest {
             uiPreset = UiPreset.IOS
         )
 
-        assertEquals(36, layout.searchBarHeightDp)
-        assertEquals(34, layout.browseToggleHeightDp)
+        assertEquals(44, layout.searchBarHeightDp)
+        assertEquals(44, layout.browseToggleHeightDp)
         assertEquals(30, layout.browseToggleIndicatorHeightDp)
         assertEquals(14, layout.browseToggleLabelFontSizeSp)
         assertEquals(32, layout.folderChipMinHeightDp)
@@ -103,25 +103,11 @@ class CommonListAppearancePolicyTest {
             androidNativeVariant = AndroidNativeVariant.MATERIAL3
         )
 
-        assertEquals(48, layout.searchBarHeightDp)
-        assertEquals(34, layout.browseToggleIndicatorHeightDp)
+        assertEquals(44, layout.searchBarHeightDp)
+        assertEquals(30, layout.browseToggleIndicatorHeightDp)
         assertEquals(14, layout.browseToggleLabelFontSizeSp)
         assertEquals(36, layout.folderChipMinHeightDp)
         assertTrue(layout.headerBackgroundAlphaMultiplier < 1f)
     }
 
-    @Test
-    fun md3eFavoriteHeaderLayout_usesExpressiveSearchAndChipTargets() {
-        val layout = resolveCommonListFavoriteHeaderLayout(
-            uiPreset = UiPreset.MD3,
-            androidNativeVariant = AndroidNativeVariant.MATERIAL3_EXPRESSIVE
-        )
-
-        assertEquals(56, layout.searchBarHeightDp)
-        assertEquals(44, layout.browseToggleHeightDp)
-        assertEquals(40, layout.browseToggleIndicatorHeightDp)
-        assertEquals(15, layout.browseToggleLabelFontSizeSp)
-        assertEquals(40, layout.folderChipMinHeightDp)
-        assertTrue(layout.headerBackgroundAlphaMultiplier > 0.88f)
-    }
 }

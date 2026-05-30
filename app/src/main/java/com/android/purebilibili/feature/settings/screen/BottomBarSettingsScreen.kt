@@ -49,6 +49,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.android.purebilibili.R
 import com.android.purebilibili.core.store.HomeHeaderBlurMode
+import com.android.purebilibili.core.store.HomeTopRightAction
 import com.android.purebilibili.core.store.SettingsManager
 import com.android.purebilibili.core.theme.BottomBarColors  //  统一底栏颜色配置
 import com.android.purebilibili.core.theme.BottomBarColorPalette  //  调色板
@@ -59,11 +60,11 @@ import com.android.purebilibili.core.theme.UiPreset
 import com.android.purebilibili.core.ui.AdaptiveScaffold
 import com.android.purebilibili.core.ui.AdaptiveTopAppBar
 import com.android.purebilibili.core.ui.rememberAppBackIcon
-import com.android.purebilibili.core.ui.resolveAppBookmarkIcon
 import com.android.purebilibili.core.ui.resolveAppDynamicIcon
 import com.android.purebilibili.core.ui.resolveAppHomeIcon
 import com.android.purebilibili.core.ui.resolveAppSettingsIcon
 import com.android.purebilibili.core.ui.resolveAppTvIcon
+import com.android.purebilibili.core.ui.resolveAppWatchLaterIcon
 import com.android.purebilibili.core.ui.adaptive.resolveDeviceUiProfile
 import com.android.purebilibili.core.ui.adaptive.resolveEffectiveMotionTier
 import com.android.purebilibili.core.util.LocalWindowSizeClass
@@ -101,7 +102,7 @@ internal fun resolveBottomBarTabIcon(
             "PROFILE" -> Icons.Outlined.Person
             "FAVORITE" -> Icons.Outlined.StarBorder
             "LIVE" -> resolveAppTvIcon(uiPreset)
-            "WATCHLATER" -> resolveAppBookmarkIcon(uiPreset)
+            "WATCHLATER" -> resolveAppWatchLaterIcon(uiPreset)
             "SETTINGS" -> resolveAppSettingsIcon(uiPreset)
             else -> resolveAppHomeIcon(uiPreset)
         }
@@ -113,7 +114,7 @@ internal fun resolveBottomBarTabIcon(
             "PROFILE" -> CupertinoIcons.Default.PersonCircle
             "FAVORITE" -> CupertinoIcons.Default.Star
             "LIVE" -> CupertinoIcons.Default.Video
-            "WATCHLATER" -> CupertinoIcons.Default.Bookmark
+            "WATCHLATER" -> resolveAppWatchLaterIcon(uiPreset)
             "SETTINGS" -> CupertinoIcons.Default.Gearshape
             else -> CupertinoIcons.Default.House
         }
@@ -260,6 +261,8 @@ fun BottomBarSettingsContent(
         .collectAsState(initial = SettingsManager.TopTabLabelMode.TEXT_ONLY)
     val headerBlurMode by SettingsManager.getHomeHeaderBlurMode(context)
         .collectAsState(initial = HomeHeaderBlurMode.FOLLOW_PRESET)
+    val homeTopRightAction by SettingsManager.getHomeTopRightAction(context)
+        .collectAsState(initial = HomeTopRightAction.SETTINGS)
     val tabletUseSidebar by SettingsManager.getTabletUseSidebar(context).collectAsState(initial = false)
     
     // 可编辑的本地状态
@@ -606,6 +609,77 @@ fun BottomBarSettingsContent(
                                             .clip(RoundedCornerShape(12.dp))
                                             .clickable {
                                                 scope.launch { SettingsManager.setTopTabLabelMode(context, mode) }
+                                            }
+                                            .background(
+                                                if (isSelected) MaterialTheme.colorScheme.primary.copy(alpha = 0.12f)
+                                                else Color.Transparent
+                                            )
+                                            .padding(horizontal = 16.dp, vertical = 8.dp)
+                                    ) {
+                                        Icon(
+                                            icon,
+                                            contentDescription = null,
+                                            tint = if (isSelected) MaterialTheme.colorScheme.primary
+                                            else MaterialTheme.colorScheme.onSurfaceVariant,
+                                            modifier = Modifier.size(24.dp)
+                                        )
+                                        Spacer(modifier = Modifier.height(4.dp))
+                                        Text(
+                                            text = label,
+                                            style = MaterialTheme.typography.labelSmall,
+                                            color = if (isSelected) MaterialTheme.colorScheme.primary
+                                            else MaterialTheme.colorScheme.onSurfaceVariant,
+                                            fontWeight = if (isSelected) FontWeight.SemiBold else FontWeight.Normal
+                                        )
+                                    }
+                                }
+                            }
+
+                            HorizontalDivider()
+
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Icon(
+                                    imageVector = if (homeTopRightAction == HomeTopRightAction.INBOX) {
+                                        CupertinoIcons.Outlined.Envelope
+                                    } else {
+                                        CupertinoIcons.Default.Gearshape
+                                    },
+                                    contentDescription = null,
+                                    tint = com.android.purebilibili.core.theme.iOSOrange,
+                                    modifier = Modifier.size(24.dp)
+                                )
+                                Spacer(modifier = Modifier.width(16.dp))
+                                Column {
+                                    Text(
+                                        text = "首页右上角入口",
+                                        style = MaterialTheme.typography.bodyLarge,
+                                        color = MaterialTheme.colorScheme.onSurface
+                                    )
+                                    Text(
+                                        text = homeTopRightAction.label,
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
+                                }
+                            }
+
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceEvenly
+                            ) {
+                                listOf(
+                                    Triple(HomeTopRightAction.SETTINGS, "设置", CupertinoIcons.Default.Gearshape),
+                                    Triple(HomeTopRightAction.INBOX, "消息", CupertinoIcons.Outlined.Envelope)
+                                ).forEach { (action, label, icon) ->
+                                    val isSelected = homeTopRightAction == action
+                                    Column(
+                                        horizontalAlignment = Alignment.CenterHorizontally,
+                                        modifier = Modifier
+                                            .clip(RoundedCornerShape(12.dp))
+                                            .clickable {
+                                                scope.launch {
+                                                    SettingsManager.setHomeTopRightAction(context, action)
+                                                }
                                             }
                                             .background(
                                                 if (isSelected) MaterialTheme.colorScheme.primary.copy(alpha = 0.12f)

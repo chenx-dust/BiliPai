@@ -9,7 +9,8 @@ class TopTabLayoutPolicyTest {
 
     @Test
     fun `visible slot count should stay in compact range`() {
-        assertEquals(4, resolveTopTabVisibleSlots(1))
+        assertEquals(1, resolveTopTabVisibleSlots(1))
+        assertEquals(3, resolveTopTabVisibleSlots(3))
         assertEquals(4, resolveTopTabVisibleSlots(4))
         assertEquals(5, resolveTopTabVisibleSlots(5, longestLabelLength = 6))
         assertEquals(4, resolveTopTabVisibleSlots(5, longestLabelLength = 9))
@@ -34,43 +35,82 @@ class TopTabLayoutPolicyTest {
     @Test
     fun `ios top tab action shares centered slot with visible categories`() {
         assertEquals(1, resolveTopTabVisibleCategorySlots(1, longestLabelLength = 2))
+        assertEquals(3, resolveTopTabVisibleCategorySlots(3, longestLabelLength = 2))
         assertEquals(5, resolveTopTabVisibleCategorySlots(5, longestLabelLength = 6))
+        assertEquals(150f, resolveTopTabActionSlotWidthDp(600f, 3, longestLabelLength = 2), 0.001f)
         assertEquals(100f, resolveTopTabActionSlotWidthDp(600f, 5, longestLabelLength = 6), 0.001f)
         assertEquals(100f, resolveTopTabItemWidthDp(500f, 5, isFloatingStyle = false), 0.001f)
     }
 
     @Test
-    fun `live route decision should follow category key not localized label`() {
-        assertTrue(shouldRouteTopTabToLivePage("LIVE"))
-        assertTrue(shouldRouteTopTabToLivePage("live"))
-        assertFalse(shouldRouteTopTabToLivePage("直播"))
-        assertFalse(shouldRouteTopTabToLivePage("RECOMMEND"))
+    fun `md3 top tabs use compact scrollable item widths instead of fixed four slots`() {
+        assertEquals(3, resolveMd3TopTabVisibleSlots())
+        assertEquals(96f, resolveMd3TopTabItemWidthDp(containerWidthDp = 320f), 0.001f)
+        assertEquals(108f, resolveMd3TopTabItemWidthDp(containerWidthDp = 360f), 0.001f)
+        assertEquals(120f, resolveMd3TopTabItemWidthDp(containerWidthDp = 640f), 0.001f)
     }
 
     @Test
-    fun `md3 top tabs keep four visible slots on every device width`() {
-        assertEquals(4, resolveMd3TopTabVisibleSlots())
-        assertEquals(80f, resolveMd3TopTabItemWidthDp(containerWidthDp = 320f), 0.001f)
-        assertEquals(90f, resolveMd3TopTabItemWidthDp(containerWidthDp = 360f), 0.001f)
-        assertEquals(160f, resolveMd3TopTabItemWidthDp(containerWidthDp = 640f), 0.001f)
+    fun `ios top tabs reserve enough height for icon label modes`() {
+        assertEquals(52f, resolveIosTopTabRowHeight(isFloatingStyle = true, labelMode = 2).value, 0.001f)
+        assertEquals(52f, resolveIosTopTabRowHeight(isFloatingStyle = true, labelMode = 1).value, 0.001f)
+        assertEquals(58f, resolveIosTopTabRowHeight(isFloatingStyle = true, labelMode = 0).value, 0.001f)
+        assertEquals(56f, resolveIosTopTabRowHeight(isFloatingStyle = false, labelMode = 0).value, 0.001f)
     }
 
     @Test
-    fun `md3 top tabs keep selected category within four visible slots`() {
+    fun `top tab item content policy avoids clipping icon plus text`() {
+        assertEquals(42f, resolveTopTabContentMinHeightDp(labelMode = 0), 0.001f)
+        assertEquals(36f, resolveTopTabContentMinHeightDp(labelMode = 1), 0.001f)
+        assertEquals(36f, resolveTopTabContentMinHeightDp(labelMode = 2), 0.001f)
+        assertEquals(2f, resolveTopTabContentVerticalPaddingDp(labelMode = 0), 0.001f)
+        assertEquals(4f, resolveTopTabContentVerticalPaddingDp(labelMode = 1), 0.001f)
+        assertEquals(4f, resolveTopTabContentVerticalPaddingDp(labelMode = 2), 0.001f)
+    }
+
+    @Test
+    fun `md3 top tabs keep every category in scroll order`() {
         assertEquals(
-            listOf(0, 1, 2, 3),
+            listOf(0, 1, 2, 3, 4),
             resolveMd3VisibleTabIndices(totalCount = 5, selectedIndex = 0)
         )
         assertEquals(
-            listOf(0, 1, 2, 4),
+            listOf(0, 1, 2, 3, 4),
             resolveMd3VisibleTabIndices(totalCount = 5, selectedIndex = 4)
         )
         assertEquals(
-            3,
+            4,
             resolveMd3SelectedVisibleIndex(
+                visibleIndices = listOf(0, 1, 2, 3, 4),
+                selectedIndex = 4
+            )
+        )
+    }
+
+    @Test
+    fun `miuix top tabs render at most four complete labels without shifting tail target to front`() {
+        assertEquals(
+            listOf(0, 1, 2, 3),
+            resolveMiuixVisibleTabIndices(totalCount = 5, selectedIndex = 0)
+        )
+        assertEquals(
+            listOf(0, 1, 2, 3),
+            resolveMiuixVisibleTabIndices(totalCount = 5, selectedIndex = 3)
+        )
+        assertEquals(
+            listOf(0, 1, 2, 4),
+            resolveMiuixVisibleTabIndices(totalCount = 5, selectedIndex = 4)
+        )
+        assertEquals(
+            3,
+            resolveMiuixSelectedVisibleIndex(
                 visibleIndices = listOf(0, 1, 2, 4),
                 selectedIndex = 4
             )
+        )
+        assertEquals(
+            listOf(0, 1, 2),
+            resolveMiuixVisibleTabIndices(totalCount = 3, selectedIndex = 2)
         )
     }
 }

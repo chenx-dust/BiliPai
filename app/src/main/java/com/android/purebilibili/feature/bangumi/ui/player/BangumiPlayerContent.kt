@@ -6,7 +6,8 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.shape.RoundedCornerShape
+import com.android.purebilibili.core.ui.AppShapes
+import com.android.purebilibili.core.ui.ContainerLevel
 //  Cupertino Icons - iOS SF Symbols 风格图标
 import io.github.alexzhirkevich.cupertino.icons.CupertinoIcons
 import io.github.alexzhirkevich.cupertino.icons.outlined.*
@@ -37,7 +38,8 @@ fun BangumiPlayerContent(
     detail: BangumiDetail,
     currentEpisode: BangumiEpisode,
     onEpisodeClick: (BangumiEpisode) -> Unit,
-    onFollowStatusSelect: (Int) -> Unit
+    onFollowStatusSelect: (Int) -> Unit,
+    onCommentClick: () -> Unit
 ) {
     val isFollowing = isBangumiFollowed(detail.userStatus)
     var showFollowStatusDialog by remember { mutableStateOf(false) }
@@ -78,12 +80,13 @@ fun BangumiPlayerContent(
             }
         }
         
-        // 追番按钮
+        // 追番与评论入口
         item {
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(horizontal = 16.dp, vertical = 8.dp)
+                    .padding(horizontal = 16.dp, vertical = 8.dp),
+                horizontalArrangement = Arrangement.spacedBy(10.dp)
             ) {
                 Button(
                     onClick = {
@@ -107,6 +110,19 @@ fun BangumiPlayerContent(
                     )
                     Spacer(modifier = Modifier.width(4.dp))
                     Text(resolveBangumiFollowStatusLabel(detail.userStatus))
+                }
+                OutlinedButton(
+                    onClick = onCommentClick,
+                    modifier = Modifier.weight(1f),
+                    enabled = currentEpisode.aid > 0L
+                ) {
+                    Icon(
+                        CupertinoIcons.Outlined.BubbleLeft,
+                        contentDescription = null,
+                        modifier = Modifier.size(18.dp)
+                    )
+                    Spacer(modifier = Modifier.width(4.dp))
+                    Text("评论")
                 }
             }
         }
@@ -140,7 +156,7 @@ fun BangumiPlayerContent(
                         Surface(
                             onClick = { showJumpDialog = true },
                             color = MaterialTheme.colorScheme.surfaceVariant,
-                            shape = RoundedCornerShape(20.dp)
+                            shape = AppShapes.container(ContainerLevel.Sheet)
                         ) {
                             Text(
                                 text = "跳转",
@@ -197,7 +213,7 @@ fun BangumiPlayerContent(
                             Surface(
                                 onClick = { selectedPage = page },
                                 color = if (isCurrentPage) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surfaceVariant,
-                                shape = RoundedCornerShape(16.dp)
+                                shape = AppShapes.container(ContainerLevel.Dialog)
                             ) {
                                 Text(
                                     text = "$start-$end",
@@ -279,7 +295,7 @@ fun BangumiPlayerContent(
                                 showFollowStatusDialog = false
                                 onFollowStatusSelect(option.status)
                             },
-                            shape = RoundedCornerShape(8.dp),
+                            shape = AppShapes.container(ContainerLevel.Chip),
                             color = if (detail.userStatus?.followStatus == option.status) {
                                 MaterialTheme.colorScheme.primaryContainer
                             } else {
@@ -329,7 +345,7 @@ fun EpisodeChipSelectable(
 
     Surface(
         modifier = Modifier.clickable(onClick = onClick),
-        shape = RoundedCornerShape(8.dp),
+        shape = AppShapes.container(ContainerLevel.Chip),
         color = if (isSelected) selectedColors.backgroundColor else MaterialTheme.colorScheme.surfaceVariant
     ) {
         Text(

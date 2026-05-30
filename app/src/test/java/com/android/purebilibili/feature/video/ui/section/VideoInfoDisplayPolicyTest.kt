@@ -16,6 +16,69 @@ import kotlin.test.assertTrue
 class VideoInfoDisplayPolicyTest {
 
     @Test
+    fun videoInfoInitialExpanded_whenDescriptionOrTagsExist() {
+        assertTrue(resolveVideoInfoInitialExpandedState(hasDescription = true, hasTags = false))
+        assertTrue(resolveVideoInfoInitialExpandedState(hasDescription = false, hasTags = true))
+        assertFalse(resolveVideoInfoInitialExpandedState(hasDescription = false, hasTags = false))
+    }
+
+    @Test
+    fun videoInfoInitialExpanded_respectsDefaultExpandedSwitch() {
+        assertFalse(
+            resolveVideoInfoInitialExpandedState(
+                hasDescription = true,
+                hasTags = true,
+                defaultExpanded = false
+            )
+        )
+        assertTrue(
+            resolveVideoInfoInitialExpandedState(
+                hasDescription = true,
+                hasTags = false,
+                defaultExpanded = true
+            )
+        )
+    }
+
+    @Test
+    fun videoDescriptionAnnotatedString_marksPlainUrlsClickable() {
+        val annotated = buildVideoDescriptionAnnotatedString(
+            desc = "简介 https://www.bilibili.com/video/BV1xx411c7mD 和 https://example.com/demo",
+            urlColor = androidx.compose.ui.graphics.Color.Blue
+        )
+
+        val links = annotated.getStringAnnotations(
+            tag = VIDEO_DESCRIPTION_URL_TAG,
+            start = 0,
+            end = annotated.length
+        )
+
+        assertEquals(
+            listOf(
+                "https://www.bilibili.com/video/BV1xx411c7mD",
+                "https://example.com/demo"
+            ),
+            links.map { it.item }
+        )
+    }
+
+    @Test
+    fun videoDescriptionAnnotatedString_marksInlineBvidClickable() {
+        val annotated = buildVideoDescriptionAnnotatedString(
+            desc = "相关视频 BV1xx411c7mD",
+            urlColor = androidx.compose.ui.graphics.Color.Blue
+        )
+
+        val link = annotated.getStringAnnotations(
+            tag = VIDEO_DESCRIPTION_URL_TAG,
+            start = 0,
+            end = annotated.length
+        ).single()
+
+        assertEquals("https://www.bilibili.com/video/BV1xx411c7mD", link.item)
+    }
+
+    @Test
     fun aiSummaryEntryShownOnlyWhenEnabledAndContentExists() {
         val aiSummary = AiSummaryData(
             code = 0,
@@ -38,6 +101,13 @@ class VideoInfoDisplayPolicyTest {
 
         assertFalse(shouldShowAiSummaryEntry(aiSummary = null, isAiSummaryEntryEnabled = true))
         assertFalse(shouldShowAiSummaryEntry(emptySummary, isAiSummaryEntryEnabled = true))
+    }
+
+    @Test
+    fun videoNoteEntryShownOnlyForLoadedVideoWithAid() {
+        assertTrue(shouldShowVideoNoteEntry(isVideoLoaded = true, aid = 123L))
+        assertFalse(shouldShowVideoNoteEntry(isVideoLoaded = false, aid = 123L))
+        assertFalse(shouldShowVideoNoteEntry(isVideoLoaded = true, aid = 0L))
     }
 
     @Test

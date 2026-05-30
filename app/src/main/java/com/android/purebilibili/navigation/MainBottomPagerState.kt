@@ -26,12 +26,19 @@ internal class MainBottomPagerState(
     var isNavigating by mutableStateOf(false)
         private set
 
+    var navigationStartPage by mutableIntStateOf(pagerState.currentPage)
+        private set
+
     private var navJob: Job? = null
 
     fun animateToPage(targetIndex: Int) {
         if (targetIndex == selectedPage) return
 
-        navJob?.cancel()
+        val previousJob = navJob
+        navJob = null
+        previousJob?.cancel()
+
+        navigationStartPage = pagerState.currentPage
         selectedPage = targetIndex
         isNavigating = true
 
@@ -43,7 +50,8 @@ internal class MainBottomPagerState(
                     pagerState.scrollToPage(targetIndex)
                 } finally {
                     isNavigating = false
-                    selectedPage = pagerState.currentPage
+                    selectedPage = targetIndex
+                    navigationStartPage = targetIndex
                 }
             }
             return
@@ -62,17 +70,16 @@ internal class MainBottomPagerState(
             try {
                 pagerState.animateScrollBy(
                     value = scrollPixels,
-                    animationSpec = tween(
-                        easing = EaseInOut,
-                        durationMillis = duration
-                    )
+                    animationSpec = tween(easing = EaseInOut, durationMillis = duration)
                 )
             } finally {
                 if (navJob == myJob) {
-                    isNavigating = false
                     if (pagerState.currentPage != targetIndex) {
-                        selectedPage = pagerState.currentPage
+                        pagerState.scrollToPage(targetIndex)
                     }
+                    isNavigating = false
+                    selectedPage = targetIndex
+                    navigationStartPage = targetIndex
                 }
             }
         }
@@ -81,6 +88,33 @@ internal class MainBottomPagerState(
     fun syncPage() {
         if (!isNavigating && selectedPage != pagerState.currentPage) {
             selectedPage = pagerState.currentPage
+        }
+    }
+
+    /**
+     * 立即跳到目标页，不播放横向滚动动画。
+     * 用于「返回首页」按钮：在视频详情把 MainHost 完全遮挡时静默切到 HOME，
+     * 待 [popBiliPaiNavKeyToRoot] 触发的横向过渡播放时背后已经是首页。
+     */
+    fun snapToPage(targetIndex: Int) {
+        if (targetIndex == pagerState.currentPage && targetIndex == selectedPage) {
+            return
+        }
+        val previousJob = navJob
+        navJob = null
+        previousJob?.cancel()
+        navigationStartPage = targetIndex
+        selectedPage = targetIndex
+        isNavigating = false
+        navJob = coroutineScope.launch {
+            try {
+                pagerState.scrollToPage(targetIndex)
+            } finally {
+                if (pagerState.currentPage == targetIndex) {
+                    selectedPage = targetIndex
+                    navigationStartPage = targetIndex
+                }
+            }
         }
     }
 }

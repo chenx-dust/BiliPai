@@ -23,10 +23,10 @@ import androidx.compose.ui.platform.LocalContext
 import com.android.purebilibili.core.store.SettingsManager
 import com.android.purebilibili.core.util.FormatUtils
 import com.android.purebilibili.core.theme.iOSBlue
+import com.android.purebilibili.core.ui.rememberAppClearIcon
 import com.android.purebilibili.data.model.response.UgcEpisode
 import com.android.purebilibili.data.model.response.UgcSeason
 import io.github.alexzhirkevich.cupertino.icons.CupertinoIcons
-import io.github.alexzhirkevich.cupertino.icons.outlined.XmarkCircle
 import io.github.alexzhirkevich.cupertino.icons.outlined.Play
 import kotlinx.coroutines.launch
 
@@ -44,6 +44,7 @@ fun CollectionSheet(
     onEpisodeClick: (UgcEpisode) -> Unit
 ) {
     val context = LocalContext.current
+    val clearIcon = rememberAppClearIcon()
     val scope = rememberCoroutineScope()
     val allEpisodes = remember(ugcSeason.sections) { ugcSeason.sections.flatMap { it.episodes } }
     val collectionSubscriptionId = remember(ugcSeason) { resolveCollectionSubscriptionId(ugcSeason) }
@@ -56,7 +57,10 @@ fun CollectionSheet(
     }
     val sortMode by SettingsManager
         .getCollectionSortMode(context, collectionSubscriptionId)
-        .collectAsState(initial = CollectionSortMode.ASCENDING)
+        .collectAsState(
+            initial = CollectionSortMode.ASCENDING,
+            context = kotlin.coroutines.EmptyCoroutineContext
+        )
     val sortedEpisodes = remember(allEpisodes, sortMode, currentBvid, currentCid) {
         sortCollectionEpisodes(
             episodes = allEpisodes,
@@ -114,7 +118,7 @@ fun CollectionSheet(
 
                 IconButton(onClick = onDismiss) {
                     Icon(
-                        CupertinoIcons.Default.XmarkCircle,
+                        clearIcon,
                         contentDescription = "关闭",
                         tint = MaterialTheme.colorScheme.onSurfaceVariant
                     )
@@ -178,6 +182,15 @@ fun CollectionSheet(
                         currentCid = currentCid,
                         episode = episode
                     )
+                    val publishTimeText = remember(episode.arc?.pubdate, episode.arc?.ctime) {
+                        resolveCollectionEpisodePublishTimeText(episode)
+                    }
+                    val metadataText = remember(publishTimeText, isCurrentEpisode) {
+                        buildList {
+                            if (publishTimeText.isNotBlank()) add(publishTimeText)
+                            if (isCurrentEpisode) add("正在播放")
+                        }.joinToString(" · ")
+                    }
                     
                     Row(
                         modifier = Modifier
@@ -271,13 +284,16 @@ fun CollectionSheet(
                                 overflow = TextOverflow.Ellipsis
                             )
                             
-                            //  正在播放标识
-                            if (isCurrentEpisode) {
+                            if (metadataText.isNotBlank()) {
                                 Spacer(modifier = Modifier.height(4.dp))
                                 Text(
-                                    text = "正在播放",
+                                    text = metadataText,
                                     style = MaterialTheme.typography.labelSmall,
-                                    color = iOSBlue,
+                                    color = if (isCurrentEpisode) {
+                                        iOSBlue
+                                    } else {
+                                        MaterialTheme.colorScheme.onSurfaceVariant
+                                    },
                                     fontWeight = FontWeight.Medium
                                 )
                             }

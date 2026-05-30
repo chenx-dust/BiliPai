@@ -2,6 +2,7 @@ package com.android.purebilibili.feature.home.components
 
 import com.android.purebilibili.core.ui.motion.BottomBarMotionProfile
 import com.android.purebilibili.core.ui.motion.resolveBottomBarMotionSpec
+import java.io.File
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
@@ -21,8 +22,19 @@ class TopTabRefractionPolicyTest {
     }
 
     @Test
-    fun `indicator should refract while dragging`() {
+    fun `indicator should refract while dragging horizontally`() {
         assertTrue(
+            shouldTopTabIndicatorUseRefraction(
+                position = 1.04f,
+                interacting = true,
+                velocityPxPerSecond = 0f
+            )
+        )
+    }
+
+    @Test
+    fun `indicator should not refract for pager scroll flag without horizontal movement`() {
+        assertFalse(
             shouldTopTabIndicatorUseRefraction(
                 position = 1.0f,
                 interacting = true,
@@ -149,7 +161,48 @@ class TopTabRefractionPolicyTest {
     }
 
     @Test
-    fun `top tab indicator only uses combined backdrop while refracting`() {
+    fun `top tab indicator uses bottom bar stretch ratio while sliding`() {
+        val transform = resolveTopTabIndicatorLayerTransform(
+            motionProgress = 1f,
+            velocityItemsPerSecond = 0f,
+            motionSpec = resolveBottomBarMotionSpec(BottomBarMotionProfile.IOS_FLOATING)
+        )
+        val bottom = resolveBottomBarIndicatorLayerTransform(
+            motionProgress = 1f,
+            velocityItemsPerSecond = 0f,
+            motionSpec = resolveBottomBarMotionSpec(BottomBarMotionProfile.IOS_FLOATING)
+        )
+
+        assertEquals(bottom.scaleX, transform.scaleX, 0.001f)
+        assertEquals(bottom.scaleY, transform.scaleY, 0.001f)
+        assertTrue(transform.scaleX > 1.5f)
+        assertTrue(transform.scaleY > 1.5f)
+    }
+
+    @Test
+    fun `top tab indicator deformation ignores vertical page scrolling`() {
+        assertFalse(
+            shouldDeformTopTabIndicator(
+                position = 2f,
+                isInMotion = true
+            )
+        )
+        assertFalse(
+            shouldDeformTopTabIndicator(
+                position = 2.004f,
+                isInMotion = true
+            )
+        )
+        assertTrue(
+            shouldDeformTopTabIndicator(
+                position = 2.02f,
+                isInMotion = true
+            )
+        )
+    }
+
+    @Test
+    fun `liquid top tab indicator keeps stable backdrop while idle`() {
         val idle = resolveTopTabIndicatorBackdropPolicy(
             effectiveLiquidGlassEnabled = true,
             hasBackdrop = true,
@@ -170,9 +223,25 @@ class TopTabRefractionPolicyTest {
         )
 
         assertFalse(idle.useCombinedBackdrop)
-        assertFalse(idle.useIndicatorBackdrop)
+        assertTrue(idle.useIndicatorBackdrop)
         assertTrue(moving.useCombinedBackdrop)
         assertTrue(moving.useIndicatorBackdrop)
+    }
+
+    @Test
+    fun `liquid top tab indicator keeps content backdrop when page backdrop is unavailable`() {
+        val idle = resolveTopTabIndicatorBackdropPolicy(
+            effectiveLiquidGlassEnabled = true,
+            hasBackdrop = false,
+            indicatorVisualPolicy = BottomBarIndicatorVisualPolicy(
+                isInMotion = false,
+                shouldRefract = false,
+                useNeutralTint = false
+            )
+        )
+
+        assertTrue(idle.useIndicatorBackdrop)
+        assertFalse(idle.useCombinedBackdrop)
     }
 
     @Test
@@ -189,5 +258,58 @@ class TopTabRefractionPolicyTest {
 
         assertTrue(moving.useIndicatorBackdrop)
         assertFalse(moving.useCombinedBackdrop)
+    }
+
+    @Test
+    fun `top tab render material keeps glass ahead of blur`() {
+        assertEquals(
+            TopTabMaterialMode.LIQUID_GLASS,
+            resolveTopTabRenderMaterialMode(
+                liquidGlassEnabled = true,
+                hasHazeState = true
+            )
+        )
+        assertEquals(
+            TopTabMaterialMode.BLUR,
+            resolveTopTabRenderMaterialMode(
+                liquidGlassEnabled = false,
+                hasHazeState = true
+            )
+        )
+        assertEquals(
+            TopTabMaterialMode.PLAIN,
+            resolveTopTabRenderMaterialMode(
+                liquidGlassEnabled = false,
+                hasHazeState = false
+            )
+        )
+    }
+
+    @Test
+    fun `home top tab row uses lightweight pager aware tabs without liquid renderer`() {
+        val source = loadSource(
+            "app/src/main/java/com/android/purebilibili/feature/home/components/TopBar.kt"
+        )
+
+        assertTrue(source.contains("LightweightHomeTopTabs("))
+        assertTrue(source.contains("resolveTopTabIndicatorRenderPosition("))
+        assertTrue(source.contains("pagerCurrentPageOffsetFraction = pagerState?.currentPageOffsetFraction"))
+        assertTrue(source.contains("resolveTopTabClickAction(index, selectedIndex)"))
+        assertFalse(source.contains("LiquidIndicator("))
+        assertFalse(source.contains("SimpleLiquidIndicator("))
+        assertFalse(source.contains("BottomBarStyleIndicatorSurface("))
+        assertFalse(source.contains("drawBackdrop("))
+        assertFalse(source.contains(".layerBackdrop(tabsBackdrop)"))
+        assertFalse(source.contains("rememberCombinedBackdrop(backdrop, tabsBackdrop)"))
+    }
+
+    private fun loadSource(path: String): String {
+        val normalizedPath = path.removePrefix("app/")
+        val sourceFile = listOf(
+            File(path),
+            File(normalizedPath)
+        ).firstOrNull { it.exists() }
+        require(sourceFile != null) { "Cannot locate $path from ${File(".").absolutePath}" }
+        return sourceFile.readText()
     }
 }

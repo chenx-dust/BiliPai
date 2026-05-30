@@ -44,6 +44,7 @@ fun ActionButton(
     count: Int,
     label: String,
     isActive: Boolean = false,
+    enabled: Boolean = true,
     onClick: () -> Unit = {},
     activeColor: Color = MaterialTheme.colorScheme.onSurfaceVariant.copy(0.6f),
     modifier: Modifier = Modifier
@@ -66,6 +67,7 @@ fun ActionButton(
     
     //  统一主题颜色 - 根据激活状态调整
     val buttonColor = when {
+        !enabled -> MaterialTheme.colorScheme.onSurfaceVariant.copy(0.45f)
         isLike && isActive -> Color(0xFFFF6B81)  // 已点赞：粉红色
         isLike -> MaterialTheme.colorScheme.onSurfaceVariant.copy(0.6f)
         isForward -> MaterialTheme.colorScheme.primary  // 使用主题色替代硬编码
@@ -81,45 +83,53 @@ fun ActionButton(
         isComment -> rememberAppCommentIcon()
         else -> icon
     }
-    val actionText = remember(label, count) {
-        resolveDynamicActionButtonText(label = label, count = count)
-    }
-    
-    Row(
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.Center,
-        modifier = modifier
-            .scale(scale)
-            .clip(RoundedCornerShape(24.dp))
-            .background(
-                color = buttonColor.copy(alpha = if (isActive && isLike) 0.15f else 0.08f)
+    BoxWithConstraints(modifier = modifier) {
+        val slotWidthDp = maxWidth.value.toInt()
+        val actionText = remember(label, count, slotWidthDp) {
+            resolveDynamicActionButtonText(
+                label = label,
+                count = count,
+                slotWidthDp = slotWidthDp
             )
-            .clickable(
-                interactionSource = interactionSource,
-                indication = null
-            ) { onClick() }
-            .padding(horizontal = 14.dp, vertical = 8.dp)
-    ) {
-        //  使用 SF Symbols 风格图标
-        Icon(
-            imageVector = buttonIcon,
-            contentDescription = label,
-            modifier = Modifier.size(18.dp),
-            tint = buttonColor
-        )
-        
-        if (actionText != null) {
-            Spacer(modifier = Modifier.width(5.dp))
-            Text(
-                text = actionText,
-                fontSize = 13.sp,
-                fontWeight = FontWeight.Medium,
-                color = buttonColor,
-                letterSpacing = 0.sp,
-                maxLines = 1,
-                softWrap = false,
-                overflow = TextOverflow.Ellipsis
+        }
+
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.Center,
+            modifier = Modifier
+                .fillMaxWidth()
+                .scale(scale)
+                .clip(RoundedCornerShape(24.dp))
+                .background(
+                    color = buttonColor.copy(alpha = if (isActive && isLike) 0.15f else 0.08f)
+                )
+                .clickable(
+                    enabled = enabled,
+                    interactionSource = interactionSource,
+                    indication = null
+                ) { onClick() }
+                .padding(horizontal = 10.dp, vertical = 8.dp)
+        ) {
+            Icon(
+                imageVector = buttonIcon,
+                contentDescription = label,
+                modifier = Modifier.size(18.dp),
+                tint = buttonColor
             )
+
+            if (actionText != null) {
+                Spacer(modifier = Modifier.width(4.dp))
+                Text(
+                    text = actionText,
+                    fontSize = 13.sp,
+                    fontWeight = FontWeight.Medium,
+                    color = buttonColor,
+                    letterSpacing = 0.sp,
+                    maxLines = 1,
+                    softWrap = false,
+                    overflow = TextOverflow.Ellipsis
+                )
+            }
         }
     }
 }

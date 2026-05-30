@@ -24,20 +24,24 @@ import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.asPaddingValues
 import androidx.compose.foundation.layout.aspectRatio
+import androidx.compose.foundation.layout.consumeWindowInsets
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
-import androidx.compose.foundation.layout.navigationBarsPadding
+import androidx.compose.foundation.layout.navigationBars
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.statusBarsPadding
+import androidx.compose.foundation.layout.statusBars
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.pager.HorizontalPager
 import androidx.compose.foundation.pager.PagerState
@@ -79,17 +83,26 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.Dp
 import com.android.purebilibili.feature.video.usecase.seekPlayerFromUserAction
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.max
 import androidx.compose.ui.unit.sp
 import coil.compose.AsyncImage
 import com.android.purebilibili.core.ui.LocalAnimatedVisibilityScope
 import com.android.purebilibili.core.ui.LocalSharedTransitionScope
 import com.android.purebilibili.core.store.SettingsManager
+import com.android.purebilibili.core.store.TabletCommentPanelWidthPreset
 import com.android.purebilibili.core.ui.transition.VIDEO_SHARED_COVER_ASPECT_RATIO
+import com.android.purebilibili.core.ui.transition.shouldEnableVideoCoverSharedTransition
 import com.android.purebilibili.core.util.ShareUtils
+import com.android.purebilibili.data.model.response.BgmInfo
 import com.android.purebilibili.data.model.response.ViewPoint
+import com.android.purebilibili.feature.common.resolveIndexedVideoLazyKey
 import com.android.purebilibili.feature.dynamic.components.ImagePreviewDialog
 import com.android.purebilibili.feature.dynamic.components.ImagePreviewTextContent
 import com.android.purebilibili.feature.video.state.VideoPlayerState
+import com.android.purebilibili.feature.video.note.VideoNoteEditorDocument
+import com.android.purebilibili.feature.video.note.buildVideoNoteShareText
+import com.android.purebilibili.feature.video.note.shouldShowVideoNoteCard
+import com.android.purebilibili.feature.video.progress.PbpProgressData
 import com.android.purebilibili.feature.video.ui.components.CommentSortFilterBar
 import com.android.purebilibili.feature.video.ui.components.CollectionRow
 import com.android.purebilibili.feature.video.ui.components.CollectionSheet
@@ -101,11 +114,15 @@ import com.android.purebilibili.feature.video.ui.components.rememberVideoComment
 import com.android.purebilibili.feature.video.ui.components.resolveReplyItemContentType
 import com.android.purebilibili.feature.video.ui.components.shouldShowReplyTopAction
 import com.android.purebilibili.feature.video.ui.section.ActionButtonsRow
+import com.android.purebilibili.feature.video.ui.section.resolveDisplayBgmList
 import com.android.purebilibili.feature.video.ui.section.UpInfoSection
 import com.android.purebilibili.feature.video.ui.section.VideoTitleWithDesc
 import com.android.purebilibili.feature.video.ui.section.VideoPlayerSection
 import com.android.purebilibili.feature.video.ui.section.AiSummaryCard
 import com.android.purebilibili.feature.video.ui.section.AiSummaryPromptCard
+import com.android.purebilibili.feature.video.ui.section.VideoNoteCard
+import com.android.purebilibili.feature.video.ui.section.VideoNoteDeleteConfirmDialog
+import com.android.purebilibili.feature.video.ui.section.VideoNoteEditorSheet
 import com.android.purebilibili.feature.video.ui.section.shouldShowAiSummaryEntry
 import com.android.purebilibili.feature.video.viewmodel.CommentUiState
 import com.android.purebilibili.feature.video.viewmodel.PlayerUiState
@@ -127,15 +144,18 @@ fun TabletCinemaLayout(
     isVerticalVideo: Boolean,
     sleepTimerMinutes: Int?,
     viewPoints: List<ViewPoint>,
+    pbpProgressData: PbpProgressData?,
     bvid: String,
     coverUrl: String = "",
     onBack: () -> Unit,
     onUpClick: (Long) -> Unit,
+    onBgmClick: (BgmInfo) -> Unit = {},
     onNavigateToAudioMode: () -> Unit,
     onToggleFullscreen: () -> Unit,
     isInPipMode: Boolean,
     onPipClick: () -> Unit,
     isPortraitFullscreen: Boolean = false,
+    onHomeClick: () -> Unit,
     currentCodec: String = "hev1",
     onCodecChange: (String) -> Unit = {},
     currentSecondCodec: String = "avc1",
@@ -146,19 +166,33 @@ fun TabletCinemaLayout(
     onRelatedVideoClick: (String, android.os.Bundle?) -> Unit,
     showUpBadge: Boolean = true,
     onSearchKeywordClick: (String) -> Unit = {},
+    onOpenBilibiliLink: ((String) -> Unit)? = null,
     currentPlayMode: com.android.purebilibili.feature.video.player.PlayMode =
         com.android.purebilibili.feature.video.player.PlayMode.SEQUENTIAL,
     onPlayModeClick: () -> Unit = {},
     forceCoverOnlyOnReturn: Boolean = false
 ) {
     val appContext = LocalContext.current
-    val policy = remember(configuration.screenWidthDp) {
+    val tabletCommentPanelWidthPreset by SettingsManager
+        .getTabletCommentPanelWidthPreset(appContext)
+        .collectAsState(
+            initial = TabletCommentPanelWidthPreset.STANDARD,
+            context = kotlin.coroutines.EmptyCoroutineContext
+        )
+    val commentMemberDecorationsEnabled by SettingsManager
+        .getCommentMemberDecorationsEnabled(appContext)
+        .collectAsState(
+            initial = false,
+            context = kotlin.coroutines.EmptyCoroutineContext
+        )
+    val policy = remember(configuration.screenWidthDp, tabletCommentPanelWidthPreset) {
         resolveTabletCinemaLayoutPolicy(
-            widthDp = configuration.screenWidthDp
+            widthDp = configuration.screenWidthDp,
+            commentWidthPreset = tabletCommentPanelWidthPreset
         )
     }
     val success = uiState as? PlayerUiState.Success
-    val downloadProgress by viewModel.downloadProgress.collectAsState()
+    val downloadProgress by viewModel.downloadProgress.collectAsState(context = kotlin.coroutines.EmptyCoroutineContext)
     val initialCurtainState = remember(configuration.screenWidthDp) {
         resolveInitialCurtainState(configuration.screenWidthDp).name
     }
@@ -202,12 +236,16 @@ fun TabletCinemaLayout(
             .fillMaxSize()
             .background(MaterialTheme.colorScheme.surfaceContainer)
     ) {
+        val padding = PaddingValues(
+            top = max(WindowInsets.statusBars.asPaddingValues().calculateTopPadding(), policy.horizontalPaddingDp.dp),
+            bottom = max(WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding(), policy.horizontalPaddingDp.dp)
+        )
         Row(
             modifier = Modifier
                 .fillMaxSize()
-                .statusBarsPadding()
-                .navigationBarsPadding()
-                .padding(horizontal = policy.horizontalPaddingDp.dp),
+                .padding(horizontal = policy.horizontalPaddingDp.dp)
+                .padding(padding)
+                .consumeWindowInsets(padding),
             horizontalArrangement = Arrangement.spacedBy(4.dp)
         ) {
             Column(
@@ -221,6 +259,7 @@ fun TabletCinemaLayout(
                     uiState = uiState,
                     viewModel = viewModel,
                     onBack = onBack,
+                    onHomeClick = onHomeClick,
                     bvid = bvid,
                     coverUrl = coverUrl,
                     onNavigateToAudioMode = onNavigateToAudioMode,
@@ -229,6 +268,7 @@ fun TabletCinemaLayout(
                     onPipClick = onPipClick,
                     sleepTimerMinutes = sleepTimerMinutes,
                     viewPoints = viewPoints,
+                    pbpProgressData = pbpProgressData,
                     isVerticalVideo = isVerticalVideo,
                     isPortraitFullscreen = isPortraitFullscreen,
                     currentCodec = currentCodec,
@@ -264,7 +304,19 @@ fun TabletCinemaLayout(
                         },
                         onCollectionEpisodeClick = onRelatedVideoClick,
                         onPageSelect = { pageIndex -> viewModel.switchPage(pageIndex) },
-                        onRetryAiSummary = viewModel::retryAiSummary
+                        onOpenBilibiliLink = onOpenBilibiliLink,
+                        onBgmClick = onBgmClick,
+                        onRelatedVideoClick = onRelatedVideoClick,
+                        onRetryAiSummary = viewModel::retryAiSummary,
+                        onCreateNoteDraftFromAiSummary = viewModel::createVideoNoteDraftFromAiSummary,
+                        onOpenVideoNoteEditor = viewModel::openVideoNoteEditor,
+                        onCloseVideoNoteEditor = viewModel::closeVideoNoteEditor,
+                        onVideoNoteDocumentChange = viewModel::updateVideoNoteEditorDocument,
+                        onInsertVideoNoteTimestamp = viewModel::insertCurrentPlaybackTimestampIntoNote,
+                        onVideoNoteTimestampClick = viewModel::seekTo,
+                        onSaveVideoNote = viewModel::saveVideoNote,
+                        onDeleteVideoNote = viewModel::deleteVideoNote,
+                        onRetryVideoNote = viewModel::retryVideoNote
                     )
                 } else {
                     Surface(
@@ -309,7 +361,9 @@ fun TabletCinemaLayout(
                 onRelatedVideoClick = onRelatedVideoClick,
                 context = appContext,
                 showUpBadge = showUpBadge,
-                onSearchKeywordClick = onSearchKeywordClick
+                showIdentityDecorations = commentMemberDecorationsEnabled,
+                onSearchKeywordClick = onSearchKeywordClick,
+                onOpenBilibiliLink = onOpenBilibiliLink
             )
         }
     }
@@ -321,6 +375,7 @@ private fun CinemaStagePlayer(
     uiState: PlayerUiState,
     viewModel: PlayerViewModel,
     onBack: () -> Unit,
+    onHomeClick: () -> Unit,
     bvid: String,
     coverUrl: String,
     onNavigateToAudioMode: () -> Unit,
@@ -329,6 +384,7 @@ private fun CinemaStagePlayer(
     onPipClick: () -> Unit,
     sleepTimerMinutes: Int?,
     viewPoints: List<ViewPoint>,
+    pbpProgressData: PbpProgressData?,
     isVerticalVideo: Boolean,
     isPortraitFullscreen: Boolean,
     currentCodec: String,
@@ -357,7 +413,7 @@ private fun CinemaStagePlayer(
     ) {
         with(requireNotNull(sharedTransitionScope)) {
             Modifier.sharedBounds(
-                sharedContentState = rememberSharedContentState(key = "video_cover_$bvid"),
+                sharedContentState = rememberSharedContentState(key = com.android.purebilibili.core.ui.transition.videoCoverSharedElementKey(bvid)),
                 animatedVisibilityScope = requireNotNull(animatedVisibilityScope),
                 clipInOverlayDuringTransition = OverlayClip(
                     RoundedCornerShape(12.dp)
@@ -395,6 +451,7 @@ private fun CinemaStagePlayer(
                 onToggleFullscreen = onToggleFullscreen,
                 onQualityChange = { qid -> viewModel.changeQuality(qid) },
                 onBack = onBack,
+                onHomeClick = onHomeClick,
                 bvid = bvid,
                 coverUrl = coverUrl,
                 onDoubleTapLike = { viewModel.toggleLike() },
@@ -412,6 +469,7 @@ private fun CinemaStagePlayer(
                 onSleepTimerChange = { viewModel.setSleepTimer(it) },
                 videoshotData = success?.videoshotData,
                 viewPoints = viewPoints,
+                pbpProgressData = pbpProgressData,
                 isVerticalVideo = isVerticalVideo,
                 onPortraitFullscreen = { playerState.setPortraitFullscreen(true) },
                 isPortraitFullscreen = isPortraitFullscreen,
@@ -462,7 +520,19 @@ private fun CinemaMetaPanel(
     onOpenComments: () -> Unit,
     onCollectionEpisodeClick: (String, android.os.Bundle?) -> Unit,
     onPageSelect: (Int) -> Unit,
-    onRetryAiSummary: () -> Unit
+    onOpenBilibiliLink: ((String) -> Unit)?,
+    onBgmClick: (BgmInfo) -> Unit = {},
+    onRelatedVideoClick: (String, android.os.Bundle?) -> Unit = { _, _ -> },
+    onRetryAiSummary: () -> Unit,
+    onCreateNoteDraftFromAiSummary: () -> Unit,
+    onOpenVideoNoteEditor: () -> Unit,
+    onCloseVideoNoteEditor: () -> Unit,
+    onVideoNoteDocumentChange: (VideoNoteEditorDocument) -> Unit,
+    onInsertVideoNoteTimestamp: () -> Unit,
+    onVideoNoteTimestampClick: (Long) -> Unit,
+    onSaveVideoNote: (VideoNoteEditorDocument) -> Unit,
+    onDeleteVideoNote: () -> Unit,
+    onRetryVideoNote: () -> Unit
 ) {
     val context = LocalContext.current
     val isDarkTheme = MaterialTheme.colorScheme.surface.luminance() < 0.5f
@@ -470,6 +540,20 @@ private fun CinemaMetaPanel(
         success.info.pages.indexOfFirst { it.cid == success.info.cid }.coerceAtLeast(0)
     }
     var showCollectionSheet by rememberSaveable(success.info.bvid) { mutableStateOf(false) }
+    var confirmDeleteNote by rememberSaveable(success.info.bvid) { mutableStateOf(false) }
+    val onShareVideoNote: (VideoNoteEditorDocument, Boolean) -> Unit = { document, isDraft ->
+        ShareUtils.shareText(
+            context = context,
+            subject = document.title.ifBlank { success.info.title },
+            text = buildVideoNoteShareText(
+                videoTitle = success.info.title,
+                bvid = success.info.bvid,
+                document = document,
+                isDraft = isDraft
+            ),
+            chooserTitle = "分享视频笔记"
+        )
+    }
 
     success.info.ugc_season?.let { season ->
         if (showCollectionSheet) {
@@ -600,7 +684,18 @@ private fun CinemaMetaPanel(
                     CinemaMetaPanelBlock.INTRO -> {
                         CinemaVideoIntroSection(
                             success = success,
-                            onRetryAiSummary = onRetryAiSummary
+                            onOpenBilibiliLink = onOpenBilibiliLink,
+                            onBgmClick = onBgmClick,
+                            onRelatedVideoClick = onRelatedVideoClick,
+                            onRetryAiSummary = onRetryAiSummary,
+                            onCreateNoteDraftFromAiSummary = onCreateNoteDraftFromAiSummary,
+                            onOpenVideoNoteEditor = onOpenVideoNoteEditor,
+                            onRetryVideoNote = onRetryVideoNote,
+                            onDeleteVideoNoteClick = { confirmDeleteNote = true },
+                            onShareVideoNote = { document -> onShareVideoNote(document, false) },
+                            onPublicVideoNoteClick = { _, url ->
+                                if (url.isNotBlank()) onOpenBilibiliLink?.invoke(url)
+                            }
                         )
                     }
                     CinemaMetaPanelBlock.COLLECTION -> {
@@ -627,6 +722,26 @@ private fun CinemaMetaPanel(
             }
         }
     }
+
+    VideoNoteEditorSheet(
+        noteState = success.videoNoteState,
+        onDismiss = onCloseVideoNoteEditor,
+        onDocumentChange = onVideoNoteDocumentChange,
+        onInsertTimestamp = onInsertVideoNoteTimestamp,
+        onTimestampClick = onVideoNoteTimestampClick,
+        onShare = { document -> onShareVideoNote(document, success.videoNoteState.editorFromAiSummary) },
+        onSave = onSaveVideoNote
+    )
+
+    VideoNoteDeleteConfirmDialog(
+        visible = confirmDeleteNote,
+        deleting = success.videoNoteState.deleting,
+        onConfirm = {
+            confirmDeleteNote = false
+            onDeleteVideoNote()
+        },
+        onDismiss = { confirmDeleteNote = false }
+    )
 }
 
 @Composable
@@ -689,13 +804,25 @@ private fun CinemaMetaUpInfo(
 @Composable
 private fun CinemaVideoIntroSection(
     success: PlayerUiState.Success,
-    onRetryAiSummary: () -> Unit = {}
+    onBgmClick: (BgmInfo) -> Unit = {},
+    onOpenBilibiliLink: ((String) -> Unit)? = null,
+    onRelatedVideoClick: (String, android.os.Bundle?) -> Unit = { _, _ -> },
+    onRetryAiSummary: () -> Unit = {},
+    onCreateNoteDraftFromAiSummary: () -> Unit = {},
+    onOpenVideoNoteEditor: () -> Unit = {},
+    onRetryVideoNote: () -> Unit = {},
+    onDeleteVideoNoteClick: () -> Unit = {},
+    onShareVideoNote: (VideoNoteEditorDocument) -> Unit = {},
+    onPublicVideoNoteClick: (Long, String) -> Unit = { _, _ -> }
 ) {
     val context = LocalContext.current
     val isDarkTheme = MaterialTheme.colorScheme.surface.luminance() < 0.5f
     val videoAiSummaryEntryEnabled by com.android.purebilibili.core.store.SettingsManager
         .getVideoAiSummaryEntryEnabled(context)
-        .collectAsState(initial = true)
+        .collectAsState(
+            initial = true,
+            context = kotlin.coroutines.EmptyCoroutineContext
+        )
 
     Column(
         verticalArrangement = Arrangement.spacedBy(8.dp)
@@ -713,8 +840,13 @@ private fun CinemaVideoIntroSection(
             VideoTitleWithDesc(
                 info = success.info,
                 videoTags = success.videoTags,
-                bgmInfo = success.bgmInfo,
-                bgmInfoList = success.bgmInfoList
+                onDescriptionUrlClick = onOpenBilibiliLink,
+                bgmList = resolveDisplayBgmList(
+                    bgmInfo = success.bgmInfo,
+                    bgmInfoList = success.bgmInfoList
+                ),
+                onBgmClick = onBgmClick,
+                onRelatedVideoClick = onRelatedVideoClick
             )
         }
         if (shouldShowAiSummaryEntry(
@@ -723,12 +855,29 @@ private fun CinemaVideoIntroSection(
             )
         ) {
             AiSummaryCard(
-                aiSummary = success.aiSummary
+                aiSummary = success.aiSummary,
+                onCreateNoteDraftClick = onCreateNoteDraftFromAiSummary
             )
         } else if (videoAiSummaryEntryEnabled && success.aiSummaryPrompt != null) {
             AiSummaryPromptCard(
                 promptState = success.aiSummaryPrompt,
                 onActionClick = onRetryAiSummary
+            )
+        }
+        val videoNoteEnabled by SettingsManager.getVideoNoteEnabled(context)
+            .collectAsState(initial = true)
+        val videoNoteDefaultCollapsed by SettingsManager.getVideoNoteDefaultCollapsed(context)
+            .collectAsState(initial = false)
+        if (shouldShowVideoNoteCard(videoNoteEnabled)) {
+            VideoNoteCard(
+                noteState = success.videoNoteState,
+                isLoggedIn = success.isLoggedIn,
+                onCreateOrEditClick = onOpenVideoNoteEditor,
+                onRetryClick = onRetryVideoNote,
+                onDeleteClick = onDeleteVideoNoteClick,
+                onShareClick = onShareVideoNote,
+                onPublicNoteClick = onPublicVideoNoteClick,
+                defaultCollapsed = videoNoteDefaultCollapsed
             )
         }
     }
@@ -751,9 +900,11 @@ private fun CinemaSideCurtain(
     onRelatedVideoClick: (String, android.os.Bundle?) -> Unit,
     context: android.content.Context,
     showUpBadge: Boolean,
-    onSearchKeywordClick: (String) -> Unit
+    showIdentityDecorations: Boolean,
+    onSearchKeywordClick: (String) -> Unit,
+    onOpenBilibiliLink: ((String) -> Unit)?
 ) {
-    val subReplyState by commentViewModel.subReplyState.collectAsState()
+    val subReplyState by commentViewModel.subReplyState.collectAsState(context = kotlin.coroutines.EmptyCoroutineContext)
     val transition = updateTransition(targetState = state, label = "SideCurtainAnimation")
     LaunchedEffect(subReplyState.visible) {
         if (subReplyState.visible) {
@@ -885,7 +1036,9 @@ private fun CinemaSideCurtain(
                                             onUpClick = onUpClick,
                                             context = context,
                                             onRelatedVideoClick = onRelatedVideoClick,
-                                            onSearchKeywordClick = onSearchKeywordClick
+                                            showIdentityDecorations = showIdentityDecorations,
+                                            onSearchKeywordClick = onSearchKeywordClick,
+                                            onOpenBilibiliLink = onOpenBilibiliLink
                                         )
                                     }
 
@@ -918,7 +1071,9 @@ private fun CinemaCommentsPane(
     onUpClick: (Long) -> Unit,
     context: android.content.Context,
     onRelatedVideoClick: (String, android.os.Bundle?) -> Unit,
-    onSearchKeywordClick: (String) -> Unit
+    showIdentityDecorations: Boolean,
+    onSearchKeywordClick: (String) -> Unit,
+    onOpenBilibiliLink: ((String) -> Unit)?
 ) {
     val commentAppearance = rememberVideoCommentAppearance()
     val listState = rememberLazyListState()
@@ -927,6 +1082,10 @@ private fun CinemaCommentsPane(
     val openCommentUrl: (String) -> Unit = openCommentUrl@{ rawUrl ->
         val url = rawUrl.trim()
         if (url.isEmpty()) return@openCommentUrl
+        if (onOpenBilibiliLink != null) {
+            onOpenBilibiliLink(url)
+            return@openCommentUrl
+        }
         when (val target = resolveCommentUrlNavigationTarget(url)) {
             is CommentUrlNavigationTarget.Video -> {
                 onRelatedVideoClick(target.videoId, null)
@@ -1009,6 +1168,7 @@ private fun CinemaCommentsPane(
             onCommentLike = commentViewModel::likeComment,
             onReportComment = commentViewModel::reportComment,
             onUrlClick = openCommentUrl,
+            showIdentityDecorations = showIdentityDecorations,
             onAvatarClick = { mid -> mid.toLongOrNull()?.let(onUpClick) ?: Unit }
         )
     } else {
@@ -1060,6 +1220,7 @@ private fun CinemaCommentsPane(
                     item = reply,
                     upMid = success.info.owner.mid,
                     showUpFlag = commentState.showUpFlag,
+                    showIdentityDecorations = showIdentityDecorations,
                     isPinned = reply.rpid in commentState.pinnedReplyIds,
                     emoteMap = success.emoteMap,
                     onClick = {},
@@ -1169,10 +1330,18 @@ private fun CinemaRelatedPane(
         modifier = Modifier.fillMaxSize(),
         contentPadding = PaddingValues(vertical = 8.dp)
     ) {
-        items(
+        itemsIndexed(
             items = success.related,
-            key = { "curtain_related_${it.bvid}" }
-        ) { video ->
+            key = { index, item ->
+                resolveIndexedVideoLazyKey(
+                    namespace = "cinema_related",
+                    index = index,
+                    bvid = item.bvid,
+                    aid = item.aid,
+                    cid = item.cid
+                )
+            }
+        ) { _, video ->
             RelatedVideoItem(
                 video = video,
                 isFollowed = video.owner.mid in success.followingMids,

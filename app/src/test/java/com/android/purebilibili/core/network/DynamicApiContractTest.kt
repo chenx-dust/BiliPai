@@ -59,6 +59,44 @@ class DynamicApiContractTest {
     }
 
     @Test
+    fun getOpusDetail_usesDocumentedOpusDetailEndpointAndIdQuery() {
+        val method = DynamicApi::class.java.methods.first { it.name == "getOpusDetail" }
+        val get = method.getAnnotation(GET::class.java)
+        assertEquals("x/polymer/web-dynamic/v1/opus/detail", get?.value)
+
+        val firstParamAnnotations = method.parameterAnnotations[0].toList()
+        val idQuery = firstParamAnnotations.filterIsInstance<Query>().firstOrNull()
+        assertEquals("id", idQuery?.value)
+    }
+
+    @Test
+    fun getSpaceArticleList_usesDocumentedOpusSpaceFeedEndpointAndQueryMap() {
+        val method = SpaceApi::class.java.methods.first { it.name == "getSpaceArticleList" }
+        val get = method.getAnnotation(GET::class.java)
+        assertEquals("x/polymer/web-dynamic/v1/opus/feed/space", get?.value)
+
+        val firstParamAnnotations = method.parameterAnnotations[0].toList()
+        assertTrue(firstParamAnnotations.any { it is QueryMap })
+    }
+
+    @Test
+    fun getSpaceDynamic_requestsFeatureFlagsForOpusTextAndCommentCounts() {
+        val method = SpaceApi::class.java.methods.first { it.name == "getSpaceDynamic" }
+        val get = method.getAnnotation(GET::class.java)
+        assertEquals("x/polymer/web-dynamic/v1/feed/space", get?.value)
+
+        val queryNames = method.parameterAnnotations
+            .mapNotNull { annotations ->
+                annotations.filterIsInstance<Query>().firstOrNull()?.value
+            }
+
+        assertTrue("features" in queryNames)
+        assertTrue(SPACE_DYNAMIC_FEATURES.contains("itemOpusStyle"))
+        assertTrue(SPACE_DYNAMIC_FEATURES.contains("opusBigCover"))
+        assertTrue(SPACE_DYNAMIC_FEATURES.contains("commentsNewVersion"))
+    }
+
+    @Test
     fun getUserDynamicFeed_usesDynamicFeedAllEndpointAndQueryMap() {
         val method = DynamicApi::class.java.methods.first { it.name == "getUserDynamicFeed" }
         val get = method.getAnnotation(GET::class.java)
@@ -66,5 +104,13 @@ class DynamicApiContractTest {
 
         val firstParamAnnotations = method.parameterAnnotations[0].toList()
         assertTrue(firstParamAnnotations.any { it is QueryMap })
+    }
+
+    @Test
+    fun getPbpData_usesBilivideoPbpEndpoint() {
+        val method = BilibiliApi::class.java.methods.first { it.name == "getPbpData" }
+        val get = method.getAnnotation(GET::class.java)
+
+        assertEquals("https://bvc.bilivideo.com/pbp/data", get?.value)
     }
 }

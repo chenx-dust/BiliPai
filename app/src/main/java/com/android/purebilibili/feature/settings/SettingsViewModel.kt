@@ -3,9 +3,12 @@ package com.android.purebilibili.feature.settings
 
 import android.app.Application
 import androidx.lifecycle.AndroidViewModel
+import androidx.lifecycle.ViewModel
+import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
 import com.android.purebilibili.core.store.SettingsManager
 import com.android.purebilibili.core.store.BottomBarSearchAutoExpandMode
+import com.android.purebilibili.core.store.HomeFeedCardWidthPreset
 import com.android.purebilibili.core.store.LiquidGlassMode
 import com.android.purebilibili.core.store.allManagedAppIconLauncherAliases
 import com.android.purebilibili.core.store.resolveDefaultLiquidGlassStrength
@@ -39,9 +42,13 @@ data class SettingsUiState(
     val darkThemeStyle: DarkThemeStyle = DarkThemeStyle.DEFAULT,
     val appLanguage: AppLanguage = AppLanguage.FOLLOW_SYSTEM,
     val dynamicColor: Boolean = true,
+    val md3ColorSource: Md3ColorSource = Md3ColorSource.FOLLOW_WALLPAPER,
+    val md3CustomColorHex: String = "#007AFF",
     val colorStyle: PaletteStyle = PaletteStyle.TonalSpot,
     val colorSpec: ColorSpec.SpecVersion = ColorSpec.SpecVersion.SPEC_2021,
     val appFontSizePreset: AppFontSizePreset = AppFontSizePreset.DEFAULT,
+    val appFontFileName: String = "",
+    val appFontDisplayName: String = "",
     val appUiScalePreset: AppUiScalePreset = AppUiScalePreset.STANDARD,
     val appDpiOverridePercent: Int = 0,
     val bgPlay: Boolean = false,
@@ -57,7 +64,6 @@ data class SettingsUiState(
     val cardAnimationEnabled: Boolean = false,     //  卡片进场动画（默认关闭）
     val cardTransitionEnabled: Boolean = false,    //  卡片过渡动画（默认关闭）
     val videoTransitionRealtimeBlurEnabled: Boolean = true,
-    val predictiveBackAnimationEnabled: Boolean = true, // [New] 预测性返回手势支持
     val smartVisualGuardEnabled: Boolean = false, // [Retired] 智能流畅优先已下线
     val cacheSize: String = "计算中...",
     val cacheBreakdown: CacheUtils.CacheBreakdown? = null,  //  详细缓存统计
@@ -72,7 +78,6 @@ data class SettingsUiState(
     val sponsorBlockAutoSkip: Boolean = true,
     // [新增] 触感反馈
     val hapticFeedbackEnabled: Boolean = true,
-    val topBarLiquidGlassEnabled: Boolean = true,
     val bottomBarLiquidGlassEnabled: Boolean = true,
     val bottomBarSearchEnabled: Boolean = false,
     val bottomBarSearchAutoExpandMode: BottomBarSearchAutoExpandMode =
@@ -85,10 +90,11 @@ data class SettingsUiState(
     // [New] 平板导航模式
     val tabletUseSidebar: Boolean = false,
     val isHeaderCollapseEnabled: Boolean = true, // [New]
-    val gridColumnCount: Int = 0 // [New]
+    val gridColumnCount: Int = 0, // [New]
+    val homeFeedCardWidthPreset: HomeFeedCardWidthPreset = HomeFeedCardWidthPreset.AUTO
 ) {
     val isLiquidGlassEnabled: Boolean
-        get() = topBarLiquidGlassEnabled || bottomBarLiquidGlassEnabled
+        get() = bottomBarLiquidGlassEnabled
 }
 
 // 内部数据类，用于分批合并流
@@ -100,6 +106,8 @@ private data class CoreSettings(
     val darkThemeStyle: DarkThemeStyle,
     val appLanguage: AppLanguage,
     val dynamicColor: Boolean,
+    val md3ColorSource: Md3ColorSource,
+    val md3CustomColorHex: String,
     val colorStyle: PaletteStyle,
     val colorSpec: ColorSpec.SpecVersion,
     val bgPlay: Boolean
@@ -110,6 +118,8 @@ data class ExtraSettings(
     val themeColorIndex: Int,
     val appIcon: String,
     val appFontSizePreset: AppFontSizePreset,
+    val appFontFileName: String,
+    val appFontDisplayName: String,
     val appUiScalePreset: AppUiScalePreset,
     val appDpiOverridePercent: Int,
     val isBottomBarFloating: Boolean,
@@ -121,10 +131,8 @@ data class ExtraSettings(
     val cardAnimationEnabled: Boolean,
     val cardTransitionEnabled: Boolean,
     val videoTransitionRealtimeBlurEnabled: Boolean,
-    val predictiveBackAnimationEnabled: Boolean,
     val smartVisualGuardEnabled: Boolean,
     val hapticFeedbackEnabled: Boolean, // [Restored]
-    val topBarLiquidGlassEnabled: Boolean = true,
     val bottomBarLiquidGlassEnabled: Boolean = true,
     val bottomBarSearchEnabled: Boolean = false,
     val bottomBarSearchAutoExpandMode: BottomBarSearchAutoExpandMode =
@@ -136,7 +144,8 @@ data class ExtraSettings(
     val liquidGlassProgress: Float, // [New]
     val tabletUseSidebar: Boolean, // [New]
     val isHeaderCollapseEnabled: Boolean, // [New]
-    val gridColumnCount: Int // [New]
+    val gridColumnCount: Int, // [New]
+    val homeFeedCardWidthPreset: HomeFeedCardWidthPreset
 )
 
 
@@ -159,9 +168,13 @@ private data class BaseSettings(
     val darkThemeStyle: DarkThemeStyle,
     val appLanguage: AppLanguage,
     val dynamicColor: Boolean,
+    val md3ColorSource: Md3ColorSource,
+    val md3CustomColorHex: String,
     val colorStyle: PaletteStyle,
     val colorSpec: ColorSpec.SpecVersion,
     val appFontSizePreset: AppFontSizePreset,
+    val appFontFileName: String,
+    val appFontDisplayName: String,
     val appUiScalePreset: AppUiScalePreset,
     val appDpiOverridePercent: Int,
     val bgPlay: Boolean,
@@ -177,10 +190,8 @@ private data class BaseSettings(
     val cardAnimationEnabled: Boolean, //  卡片进场动画
     val cardTransitionEnabled: Boolean, //  卡片过渡动画
     val videoTransitionRealtimeBlurEnabled: Boolean,
-    val predictiveBackAnimationEnabled: Boolean, // [New]
     val smartVisualGuardEnabled: Boolean, // [New]
     val hapticFeedbackEnabled: Boolean, // [新增]
-    val topBarLiquidGlassEnabled: Boolean,
     val bottomBarLiquidGlassEnabled: Boolean,
     val bottomBarSearchEnabled: Boolean,
     val bottomBarSearchAutoExpandMode: BottomBarSearchAutoExpandMode,
@@ -191,7 +202,8 @@ private data class BaseSettings(
     val liquidGlassProgress: Float, // [New]
     val tabletUseSidebar: Boolean, // [New]
     val isHeaderCollapseEnabled: Boolean, // [New]
-    val gridColumnCount: Int // [New]
+    val gridColumnCount: Int, // [New]
+    val homeFeedCardWidthPreset: HomeFeedCardWidthPreset
 )
 
 private fun <T> Flow<T>.asAnyFlow(): Flow<Any?> = map { it }
@@ -205,6 +217,8 @@ class SettingsViewModel(application: Application) : AndroidViewModel(application
         val themeColorIndex: Int,
         val appIcon: String,
         val appFontSizePreset: AppFontSizePreset,
+        val appFontFileName: String,
+        val appFontDisplayName: String,
         val appUiScalePreset: AppUiScalePreset,
         val appDpiOverridePercent: Int
     )
@@ -223,6 +237,8 @@ class SettingsViewModel(application: Application) : AndroidViewModel(application
         SettingsManager.getDarkThemeStyle(context).asAnyFlow(),
         SettingsManager.getAppLanguage(context).asAnyFlow(),
         SettingsManager.getDynamicColor(context).asAnyFlow(),
+        SettingsManager.getMd3ColorSource(context).asAnyFlow(),
+        SettingsManager.getMd3CustomColorHex(context).asAnyFlow(),
         SettingsManager.getThemeColorStyle(context).asAnyFlow(),
         SettingsManager.getThemeColorSpec(context).asAnyFlow(),
         SettingsManager.getBgPlay(context).asAnyFlow()
@@ -235,9 +251,11 @@ class SettingsViewModel(application: Application) : AndroidViewModel(application
             darkThemeStyle = values[4] as DarkThemeStyle,
             appLanguage = values[5] as AppLanguage,
             dynamicColor = values[6] as Boolean,
-            colorStyle = values[7] as PaletteStyle,
-            colorSpec = values[8] as ColorSpec.SpecVersion,
-            bgPlay = values[9] as Boolean
+            md3ColorSource = values[7] as Md3ColorSource,
+            md3CustomColorHex = values[8] as String,
+            colorStyle = values[9] as PaletteStyle,
+            colorSpec = values[10] as ColorSpec.SpecVersion,
+            bgPlay = values[11] as Boolean
         )
     }
     
@@ -247,6 +265,8 @@ class SettingsViewModel(application: Application) : AndroidViewModel(application
         SettingsManager.getThemeColorIndex(context).asAnyFlow(),
         SettingsManager.getAppIcon(context).asAnyFlow(),
         SettingsManager.getAppFontSizePreset(context).asAnyFlow(),
+        SettingsManager.getAppFontFileName(context).asAnyFlow(),
+        SettingsManager.getAppFontDisplayName(context).asAnyFlow(),
         SettingsManager.getAppUiScalePreset(context).asAnyFlow(),
         SettingsManager.getAppDpiOverridePercent(context).asAnyFlow()
     ) { values ->
@@ -255,8 +275,10 @@ class SettingsViewModel(application: Application) : AndroidViewModel(application
             themeColorIndex = values[1] as Int,
             appIcon = values[2] as String,
             appFontSizePreset = values[3] as AppFontSizePreset,
-            appUiScalePreset = values[4] as AppUiScalePreset,
-            appDpiOverridePercent = values[5] as Int
+            appFontFileName = values[4] as String,
+            appFontDisplayName = values[5] as String,
+            appUiScalePreset = values[6] as AppUiScalePreset,
+            appDpiOverridePercent = values[7] as Int
         )
     }
     
@@ -267,10 +289,8 @@ class SettingsViewModel(application: Application) : AndroidViewModel(application
         SettingsManager.getCardAnimationEnabled(context).asAnyFlow(), // [Restored]
         SettingsManager.getCardTransitionEnabled(context).asAnyFlow(),
         SettingsManager.getVideoTransitionRealtimeBlurEnabled(context).asAnyFlow(),
-        SettingsManager.getPredictiveBackAnimationEnabled(context).asAnyFlow(), // [New]
         SettingsManager.getSmartVisualGuardEnabled(context).asAnyFlow(), // [New]
         SettingsManager.getHapticFeedbackEnabled(context).asAnyFlow(), // [新增]
-        SettingsManager.getTopBarLiquidGlassEnabled(context).asAnyFlow(),
         SettingsManager.getBottomBarLiquidGlassEnabled(context).asAnyFlow(),
         SettingsManager.getBottomBarSearchEnabled(context).asAnyFlow(),
         SettingsManager.getBottomBarSearchAutoExpandMode(context).asAnyFlow(),
@@ -281,7 +301,8 @@ class SettingsViewModel(application: Application) : AndroidViewModel(application
         SettingsManager.getLiquidGlassProgress(context).asAnyFlow(), // [New]
         SettingsManager.getTabletUseSidebar(context).asAnyFlow(), // [New]
         SettingsManager.getHeaderCollapseEnabled(context).asAnyFlow(), // [New]
-        SettingsManager.getGridColumnCount(context).asAnyFlow() // [New]
+        SettingsManager.getGridColumnCount(context).asAnyFlow(), // [New]
+        SettingsManager.getHomeFeedCardWidthPreset(context).asAnyFlow()
     ) { values ->
         val isBottomBarFloating = values[0] as Boolean
         val labelMode = values[1] as Int
@@ -289,21 +310,20 @@ class SettingsViewModel(application: Application) : AndroidViewModel(application
         val cardAnimation = values[3] as Boolean
         val cardTransition = values[4] as Boolean
         val videoTransitionRealtimeBlur = values[5] as Boolean
-        val predictiveBackAnimation = values[6] as Boolean
-        val smartVisualGuard = values[7] as Boolean
-        val hapticFeedback = values[8] as Boolean
-        val topBarLiquidGlass = values[9] as Boolean
-        val bottomBarLiquidGlass = values[10] as Boolean
-        val bottomBarSearch = values[11] as Boolean
-        val bottomBarSearchAutoExpandMode = values[12] as BottomBarSearchAutoExpandMode
-        val androidNativeLiquidGlass = values[13] as Boolean
-        val liquidGlassStyle = values[14] as com.android.purebilibili.core.store.LiquidGlassStyle
-        val liquidGlassMode = values[15] as LiquidGlassMode
-        val liquidGlassStrength = values[16] as Float
-        val liquidGlassProgress = values[17] as Float
-        val tabletUseSidebar = values[18] as Boolean
-        val headerCollapse = values[19] as Boolean
-        val gridColumnCount = values[20] as Int
+        val smartVisualGuard = values[6] as Boolean
+        val hapticFeedback = values[7] as Boolean
+        val bottomBarLiquidGlass = values[8] as Boolean
+        val bottomBarSearch = values[9] as Boolean
+        val bottomBarSearchAutoExpandMode = values[10] as BottomBarSearchAutoExpandMode
+        val androidNativeLiquidGlass = values[11] as Boolean
+        val liquidGlassStyle = values[12] as com.android.purebilibili.core.store.LiquidGlassStyle
+        val liquidGlassMode = values[13] as LiquidGlassMode
+        val liquidGlassStrength = values[14] as Float
+        val liquidGlassProgress = values[15] as Float
+        val tabletUseSidebar = values[16] as Boolean
+        val headerCollapse = values[17] as Boolean
+        val gridColumnCount = values[18] as Int
+        val homeFeedCardWidthPreset = values[19] as HomeFeedCardWidthPreset
         
         data class Ui2(
             val f: Boolean,
@@ -312,10 +332,8 @@ class SettingsViewModel(application: Application) : AndroidViewModel(application
             val ca: Boolean,
             val ct: Boolean,
             val vtrb: Boolean,
-            val pba: Boolean,
             val svg: Boolean,
             val h: Boolean,
-            val tlg: Boolean,
             val blg: Boolean,
             val bbs: Boolean,
             val bbsam: BottomBarSearchAutoExpandMode,
@@ -326,7 +344,8 @@ class SettingsViewModel(application: Application) : AndroidViewModel(application
             val lgp: Float,
             val tus: Boolean,
             val hc: Boolean,
-            val gcc: Int
+            val gcc: Int,
+            val hfcwp: HomeFeedCardWidthPreset
         )
         Ui2(
             isBottomBarFloating,
@@ -335,10 +354,8 @@ class SettingsViewModel(application: Application) : AndroidViewModel(application
             cardAnimation,
             cardTransition,
             videoTransitionRealtimeBlur,
-            predictiveBackAnimation,
             smartVisualGuard,
             hapticFeedback,
-            topBarLiquidGlass,
             bottomBarLiquidGlass,
             bottomBarSearch,
             bottomBarSearchAutoExpandMode,
@@ -349,7 +366,8 @@ class SettingsViewModel(application: Application) : AndroidViewModel(application
             liquidGlassProgress,
             tabletUseSidebar,
             headerCollapse,
-            gridColumnCount
+            gridColumnCount,
+            homeFeedCardWidthPreset
         )
     }
 
@@ -361,6 +379,8 @@ class SettingsViewModel(application: Application) : AndroidViewModel(application
             themeColorIndex = ui1.themeColorIndex,
             appIcon = ui1.appIcon,
             appFontSizePreset = ui1.appFontSizePreset,
+            appFontFileName = ui1.appFontFileName,
+            appFontDisplayName = ui1.appFontDisplayName,
             appUiScalePreset = ui1.appUiScalePreset,
             appDpiOverridePercent = ui1.appDpiOverridePercent,
             isBottomBarFloating = ui2.f,
@@ -369,10 +389,8 @@ class SettingsViewModel(application: Application) : AndroidViewModel(application
             cardAnimationEnabled = ui2.ca,
             cardTransitionEnabled = ui2.ct,
             videoTransitionRealtimeBlurEnabled = ui2.vtrb,
-            predictiveBackAnimationEnabled = ui2.pba,
             smartVisualGuardEnabled = ui2.svg,
             hapticFeedbackEnabled = ui2.h, // [新增]
-            topBarLiquidGlassEnabled = ui2.tlg,
             bottomBarLiquidGlassEnabled = ui2.blg,
             bottomBarSearchEnabled = ui2.bbs,
             bottomBarSearchAutoExpandMode = ui2.bbsam,
@@ -384,6 +402,7 @@ class SettingsViewModel(application: Application) : AndroidViewModel(application
             tabletUseSidebar = ui2.tus, // [New]
             isHeaderCollapseEnabled = ui2.hc, // [New]
             gridColumnCount = ui2.gcc, // [New]
+            homeFeedCardWidthPreset = ui2.hfcwp,
             headerBlurEnabled = false, // 暂存，将在下一步合并
             bottomBarBlurEnabled = false, // 暂存
             blurIntensity = BlurIntensity.THIN // 暂存
@@ -437,9 +456,13 @@ class SettingsViewModel(application: Application) : AndroidViewModel(application
             darkThemeStyle = core.darkThemeStyle,
             appLanguage = core.appLanguage,
             dynamicColor = core.dynamicColor,
+            md3ColorSource = core.md3ColorSource,
+            md3CustomColorHex = core.md3CustomColorHex,
             colorStyle = core.colorStyle,
             colorSpec = core.colorSpec,
             appFontSizePreset = extra.appFontSizePreset,
+            appFontFileName = extra.appFontFileName,
+            appFontDisplayName = extra.appFontDisplayName,
             appUiScalePreset = extra.appUiScalePreset,
             appDpiOverridePercent = extra.appDpiOverridePercent,
             bgPlay = core.bgPlay,
@@ -455,10 +478,8 @@ class SettingsViewModel(application: Application) : AndroidViewModel(application
             cardAnimationEnabled = extra.cardAnimationEnabled,
             cardTransitionEnabled = extra.cardTransitionEnabled,
             videoTransitionRealtimeBlurEnabled = extra.videoTransitionRealtimeBlurEnabled,
-            predictiveBackAnimationEnabled = extra.predictiveBackAnimationEnabled,
             smartVisualGuardEnabled = extra.smartVisualGuardEnabled,
             hapticFeedbackEnabled = extra.hapticFeedbackEnabled, // [新增]
-            topBarLiquidGlassEnabled = extra.topBarLiquidGlassEnabled,
             bottomBarLiquidGlassEnabled = extra.bottomBarLiquidGlassEnabled,
             bottomBarSearchEnabled = extra.bottomBarSearchEnabled,
             bottomBarSearchAutoExpandMode = extra.bottomBarSearchAutoExpandMode,
@@ -469,7 +490,8 @@ class SettingsViewModel(application: Application) : AndroidViewModel(application
             liquidGlassProgress = extra.liquidGlassProgress, // [New]
             tabletUseSidebar = extra.tabletUseSidebar, // [New]
             isHeaderCollapseEnabled = extra.isHeaderCollapseEnabled, // [New]
-            gridColumnCount = extra.gridColumnCount // [New]
+            gridColumnCount = extra.gridColumnCount, // [New]
+            homeFeedCardWidthPreset = extra.homeFeedCardWidthPreset
         )
 
     }
@@ -492,9 +514,13 @@ class SettingsViewModel(application: Application) : AndroidViewModel(application
             darkThemeStyle = settings.darkThemeStyle,
             appLanguage = settings.appLanguage,
             dynamicColor = settings.dynamicColor,
+            md3ColorSource = settings.md3ColorSource,
+            md3CustomColorHex = settings.md3CustomColorHex,
             colorStyle = settings.colorStyle,
             colorSpec = settings.colorSpec,
             appFontSizePreset = settings.appFontSizePreset,
+            appFontFileName = settings.appFontFileName,
+            appFontDisplayName = settings.appFontDisplayName,
             appUiScalePreset = settings.appUiScalePreset,
             appDpiOverridePercent = settings.appDpiOverridePercent,
             bgPlay = settings.bgPlay,
@@ -510,10 +536,8 @@ class SettingsViewModel(application: Application) : AndroidViewModel(application
             cardAnimationEnabled = settings.cardAnimationEnabled,
             cardTransitionEnabled = settings.cardTransitionEnabled,
             videoTransitionRealtimeBlurEnabled = settings.videoTransitionRealtimeBlurEnabled,
-            predictiveBackAnimationEnabled = settings.predictiveBackAnimationEnabled,
             smartVisualGuardEnabled = settings.smartVisualGuardEnabled,
             hapticFeedbackEnabled = settings.hapticFeedbackEnabled, // [新增]
-            topBarLiquidGlassEnabled = settings.topBarLiquidGlassEnabled,
             bottomBarLiquidGlassEnabled = settings.bottomBarLiquidGlassEnabled,
             bottomBarSearchEnabled = settings.bottomBarSearchEnabled,
             bottomBarSearchAutoExpandMode = settings.bottomBarSearchAutoExpandMode,
@@ -525,6 +549,7 @@ class SettingsViewModel(application: Application) : AndroidViewModel(application
             tabletUseSidebar = settings.tabletUseSidebar, // [New]
             isHeaderCollapseEnabled = settings.isHeaderCollapseEnabled, // [New]
             gridColumnCount = settings.gridColumnCount, // [New]
+            homeFeedCardWidthPreset = settings.homeFeedCardWidthPreset,
 
             cacheSize = cache.first,
             cacheBreakdown = cache.second,  //  详细缓存统计
@@ -597,6 +622,12 @@ class SettingsViewModel(application: Application) : AndroidViewModel(application
         }
     }
     fun toggleDynamicColor(value: Boolean) { viewModelScope.launch { SettingsManager.setDynamicColor(context, value) } }
+    fun setMd3ColorSource(source: Md3ColorSource) {
+        viewModelScope.launch { SettingsManager.setMd3ColorSource(context, source) }
+    }
+    fun setMd3CustomColorHex(hex: String) {
+        viewModelScope.launch { SettingsManager.setMd3CustomColorHex(context, hex) }
+    }
     fun setThemeColorStyle(style: PaletteStyle) {
         viewModelScope.launch { SettingsManager.setThemeColorStyle(context, style) }
     }
@@ -605,6 +636,12 @@ class SettingsViewModel(application: Application) : AndroidViewModel(application
     }
     fun setAppFontSizePreset(preset: AppFontSizePreset) {
         viewModelScope.launch { SettingsManager.setAppFontSizePreset(context, preset) }
+    }
+    fun setAppFontFile(fileName: String, displayName: String) {
+        viewModelScope.launch { SettingsManager.setAppFontFile(context, fileName, displayName) }
+    }
+    fun clearAppFontFile() {
+        viewModelScope.launch { SettingsManager.clearAppFontFile(context) }
     }
     fun setAppUiScalePreset(preset: AppUiScalePreset) {
         viewModelScope.launch { SettingsManager.setAppUiScalePreset(context, preset) }
@@ -618,10 +655,6 @@ class SettingsViewModel(application: Application) : AndroidViewModel(application
     fun setThemeColorIndex(index: Int) { 
         viewModelScope.launch { 
             SettingsManager.setThemeColorIndex(context, index)
-            //  选择自定义主题色时，自动关闭动态取色
-            if (index != 0) {
-                SettingsManager.setDynamicColor(context, false)
-            }
         }
     }
 
@@ -631,32 +664,42 @@ class SettingsViewModel(application: Application) : AndroidViewModel(application
             val normalizedIconKey = normalizeAppIconKey(iconKey)
             // 1. 保存偏好
             SettingsManager.setAppIcon(context, normalizedIconKey)
-            
-            // 2. 应用 Alias
-            val pm = context.packageManager
-            val packageName = context.packageName
+            applyLauncherAliasForCurrentSplashIconSetting(normalizedIconKey)
+        }
+    }
 
-            val targetAlias = resolveAppIconLauncherAlias(packageName, normalizedIconKey)
-            val allUniqueAliases = allManagedAppIconLauncherAliases(packageName)
-            
-            android.util.Log.d("SettingsViewModel", "Switching icon to: $iconKey -> $normalizedIconKey -> $targetAlias")
-            
-            try {
-                // 第一步：先启用目标 alias（确保始终有一个活动入口点）
-                // ⚠️ [修复] 在尝试杀死进程的操作前，再次延迟，确保 DataStore/SharedPrefs 完全写入磁盘
-                kotlinx.coroutines.delay(100)
-                
-                pm.setComponentEnabledSetting(
-                    android.content.ComponentName(packageName, targetAlias),
-                    android.content.pm.PackageManager.COMPONENT_ENABLED_STATE_ENABLED,
-                    android.content.pm.PackageManager.DONT_KILL_APP
-                )
-                android.util.Log.d("SettingsViewModel", "Enabled alias: $targetAlias")
+    private suspend fun applyLauncherAliasForCurrentSplashIconSetting(iconKey: String) {
+        val normalizedIconKey = normalizeAppIconKey(iconKey)
+        // 2. 应用 Alias
+        val pm = context.packageManager
+        val packageName = context.packageName
+        val splashIconVisible = SettingsManager.isSplashIconAnimationEnabledSync(context)
 
-                // 第二步：立即禁用其他 alias，避免部分桌面出现“双图标”残留
-                allUniqueAliases
-                    .filter { it != targetAlias }
-                    .forEach { aliasFullName ->
+        val targetAlias = resolveAppIconLauncherAlias(
+            packageName = packageName,
+            rawKey = normalizedIconKey,
+            splashIconVisible = splashIconVisible
+        )
+        val allUniqueAliases = allManagedAppIconLauncherAliases(packageName)
+
+        android.util.Log.d("SettingsViewModel", "Switching icon to: $normalizedIconKey, splashIconVisible=$splashIconVisible -> $targetAlias")
+
+        try {
+            // 第一步：先启用目标 alias（确保始终有一个活动入口点）
+            // ⚠️ [修复] 在尝试杀死进程的操作前，再次延迟，确保 DataStore/SharedPrefs 完全写入磁盘
+            kotlinx.coroutines.delay(100)
+
+            pm.setComponentEnabledSetting(
+                android.content.ComponentName(packageName, targetAlias),
+                android.content.pm.PackageManager.COMPONENT_ENABLED_STATE_ENABLED,
+                android.content.pm.PackageManager.DONT_KILL_APP
+            )
+            android.util.Log.d("SettingsViewModel", "Enabled alias: $targetAlias")
+
+            // 第二步：立即禁用其他 alias，避免部分桌面出现“双图标”残留
+            allUniqueAliases
+                .filter { it != targetAlias }
+                .forEach { aliasFullName ->
                     try {
                         pm.setComponentEnabledSetting(
                             android.content.ComponentName(packageName, aliasFullName),
@@ -667,10 +710,9 @@ class SettingsViewModel(application: Application) : AndroidViewModel(application
                         android.util.Log.w("SettingsViewModel", "Failed to disable alias: $aliasFullName", e)
                     }
                 }
-                android.util.Log.d("SettingsViewModel", "Icon switch completed: $normalizedIconKey")
-            } catch (e: Exception) {
-                android.util.Log.e("SettingsViewModel", "Failed to switch app icon to $normalizedIconKey", e)
-            }
+            android.util.Log.d("SettingsViewModel", "Icon switch completed: $normalizedIconKey")
+        } catch (e: Exception) {
+            android.util.Log.e("SettingsViewModel", "Failed to switch app icon to $normalizedIconKey", e)
         }
     }
 
@@ -685,11 +727,9 @@ class SettingsViewModel(application: Application) : AndroidViewModel(application
     fun toggleHeaderBlur(value: Boolean) {
         viewModelScope.launch {
             val resolved = resolveTopBarBlurToggleState(
-                enableHeaderBlur = value,
-                currentLiquidGlassEnabled = state.value.topBarLiquidGlassEnabled
+                enableHeaderBlur = value
             )
             SettingsManager.setHeaderBlurEnabled(context, resolved.headerBlurEnabled)
-            SettingsManager.setTopBarLiquidGlassEnabled(context, resolved.liquidGlassEnabled)
         }
     }
     fun toggleHeaderCollapse(value: Boolean) { viewModelScope.launch { SettingsManager.setHeaderCollapseEnabled(context, value) } }
@@ -714,13 +754,6 @@ class SettingsViewModel(application: Application) : AndroidViewModel(application
     fun toggleVideoTransitionRealtimeBlur(value: Boolean) {
         viewModelScope.launch {
             SettingsManager.setVideoTransitionRealtimeBlurEnabled(context, value)
-        }
-    }
-
-    // [New] 预测性返回手势支持开关
-    fun togglePredictiveBackAnimation(value: Boolean) {
-        viewModelScope.launch {
-            SettingsManager.setPredictiveBackAnimationEnabled(context, value)
         }
     }
 
@@ -762,23 +795,18 @@ class SettingsViewModel(application: Application) : AndroidViewModel(application
     // [New] Splash Screen
     fun toggleSplashEnabled(value: Boolean) { viewModelScope.launch { SettingsManager.setSplashEnabled(context, value) } }
     fun toggleSplashRandomEnabled(value: Boolean) { viewModelScope.launch { SettingsManager.setSplashRandomEnabled(context, value) } }
-    fun toggleSplashIconAnimationEnabled(value: Boolean) { viewModelScope.launch { SettingsManager.setSplashIconAnimationEnabled(context, value) } }
+    fun toggleSplashIconAnimationEnabled(value: Boolean) {
+        viewModelScope.launch(kotlinx.coroutines.Dispatchers.IO) {
+            SettingsManager.setSplashIconAnimationEnabled(context, value)
+            val currentIcon = SettingsManager.getAppIconSync(context)
+            applyLauncherAliasForCurrentSplashIconSetting(currentIcon)
+        }
+    }
 
     // [New] 触感反馈
     fun toggleHapticFeedback(value: Boolean) { viewModelScope.launch { SettingsManager.setHapticFeedbackEnabled(context, value) } }
     
     // [New] Liquid Glass
-    fun toggleTopBarLiquidGlass(enabled: Boolean) {
-        viewModelScope.launch {
-            val resolved = resolveTopBarLiquidGlassToggleState(
-                enableLiquidGlass = enabled,
-                currentHeaderBlurEnabled = state.value.headerBlurEnabled
-            )
-            SettingsManager.setTopBarLiquidGlassEnabled(context, resolved.liquidGlassEnabled)
-            SettingsManager.setHeaderBlurEnabled(context, resolved.headerBlurEnabled)
-        }
-    }
-
     fun toggleBottomBarLiquidGlass(enabled: Boolean) {
         viewModelScope.launch {
             val resolved = resolveLiquidGlassToggleState(
@@ -806,16 +834,10 @@ class SettingsViewModel(application: Application) : AndroidViewModel(application
         viewModelScope.launch {
             SettingsManager.setAndroidNativeLiquidGlassEnabled(context, enabled)
             if (enabled) {
-                val topBarResolved = resolveTopBarLiquidGlassToggleState(
-                    enableLiquidGlass = true,
-                    currentHeaderBlurEnabled = state.value.headerBlurEnabled
-                )
                 val bottomBarResolved = resolveLiquidGlassToggleState(
                     enableLiquidGlass = true,
                     currentBottomBarBlurEnabled = state.value.bottomBarBlurEnabled
                 )
-                SettingsManager.setTopBarLiquidGlassEnabled(context, topBarResolved.liquidGlassEnabled)
-                SettingsManager.setHeaderBlurEnabled(context, topBarResolved.headerBlurEnabled)
                 SettingsManager.setBottomBarLiquidGlassEnabled(context, bottomBarResolved.liquidGlassEnabled)
                 SettingsManager.setBottomBarBlurEnabled(context, bottomBarResolved.bottomBarBlurEnabled)
             }
@@ -873,8 +895,26 @@ class SettingsViewModel(application: Application) : AndroidViewModel(application
             SettingsManager.setGridColumnCount(context, count)
         }
     }
+
+    fun setHomeFeedCardWidthPreset(preset: HomeFeedCardWidthPreset) {
+        viewModelScope.launch {
+            SettingsManager.setHomeFeedCardWidthPreset(context, preset)
+        }
+    }
     
 
+}
+
+internal class SettingsViewModelFactory(
+    private val application: Application
+) : ViewModelProvider.Factory {
+    @Suppress("UNCHECKED_CAST")
+    override fun <T : ViewModel> create(modelClass: Class<T>): T {
+        if (modelClass.isAssignableFrom(SettingsViewModel::class.java)) {
+            return SettingsViewModel(application) as T
+        }
+        throw IllegalArgumentException("Unknown ViewModel class: ${modelClass.name}")
+    }
 }
 
 // Move DisplayMode enum here to be accessible

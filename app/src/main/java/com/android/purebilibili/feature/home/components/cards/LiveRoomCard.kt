@@ -69,6 +69,7 @@ fun LiveRoomCard(
             useLowQuality = useLowQualityCover
         )
     }
+    val viewerCount = remember(room.online, room.watchedShow) { room.viewerCount() }
     val triggerCardClick = { onClick(room.roomid) }
 
     Column(
@@ -101,7 +102,7 @@ fun LiveRoomCard(
                     if (sharedTransitionScope != null && animatedVisibilityScope != null) {
                         with(sharedTransitionScope) {
                             Modifier.sharedElement(
-                                sharedContentState = rememberSharedContentState(key = "live_cover_${room.roomid}"),
+                                sharedContentState = rememberSharedContentState(key = com.android.purebilibili.core.ui.transition.liveCoverSharedElementKey(room.roomid)),
                                 animatedVisibilityScope = animatedVisibilityScope
                             )
                         }
@@ -184,7 +185,7 @@ fun LiveRoomCard(
                 )
                 Spacer(modifier = Modifier.width(4.dp))
                 Text(
-                    text = FormatUtils.formatStat(room.online.toLong()),
+                    text = FormatUtils.formatStat(viewerCount.toLong()),
                     color = Color.White.copy(0.95f),
                     fontSize = 11.sp,
                     fontWeight = FontWeight.Medium

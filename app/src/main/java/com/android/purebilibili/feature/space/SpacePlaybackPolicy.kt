@@ -1,6 +1,8 @@
 package com.android.purebilibili.feature.space
 
 import com.android.purebilibili.data.model.response.SpaceVideoItem
+import com.android.purebilibili.feature.list.VideoProgressDisplayState
+import com.android.purebilibili.feature.list.resolveVideoDisplayProgressState
 import com.android.purebilibili.feature.video.player.PlaylistItem
 
 data class SpaceExternalPlaylist(
@@ -62,6 +64,23 @@ fun buildExternalPlaylistFromSpaceVideos(
 
 fun resolveSpacePlayAllStartTarget(videos: List<SpaceVideoItem>): String? {
     return videos.firstOrNull()?.bvid
+}
+
+internal fun resolveSpaceVideoProgressState(
+    video: SpaceVideoItem,
+    localPositionMs: Long
+): VideoProgressDisplayState {
+    val durationSec = parseSpaceVideoLengthToSeconds(video.length).toInt()
+    return resolveVideoDisplayProgressState(
+        serverProgressSec = 0,
+        durationSec = durationSec,
+        localPositionMs = localPositionMs,
+        viewAt = if (localPositionMs > 0L) 1L else 0L
+    )
+}
+
+internal fun resolveSpaceResumePositionMs(localPositionMs: Long): Long {
+    return localPositionMs.coerceAtLeast(0L)
 }
 
 fun resolveSpacePriorityTabLoadState(

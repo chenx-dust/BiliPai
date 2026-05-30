@@ -10,7 +10,6 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
@@ -32,6 +31,8 @@ import com.android.purebilibili.feature.home.HomeTopTabGestureAction
 import com.android.purebilibili.feature.home.resolveHomeTopTabGestureAction
 import com.android.purebilibili.core.store.LiquidGlassStyle
 import com.android.purebilibili.core.ui.adaptive.MotionTier
+import com.android.purebilibili.core.ui.AppShapes
+import com.android.purebilibili.core.ui.ContainerLevel
 import com.kyant.backdrop.backdrops.LayerBackdrop
 import dev.chrisbanes.haze.HazeState
 
@@ -64,6 +65,7 @@ internal fun HomeTopTabChrome(
     gestureEnabled: Boolean = false,
     isTabsCollapsed: Boolean = false,
     onTabsCollapsedChange: ((Boolean) -> Unit)? = null,
+    drawChromeSurface: Boolean = true,
     content: @Composable () -> Unit
 ) {
     val density = LocalDensity.current
@@ -82,7 +84,6 @@ internal fun HomeTopTabChrome(
             .height(currentTabHeight)
             .graphicsLayer { alpha = containerAlpha }
             .offset { IntOffset(x = 0, y = tabVerticalOffset.roundToPx()) }
-            .clip(tabShape)
             .then(
                 if (gestureEnabled && onTabsCollapsedChange != null) {
                     Modifier.pointerInput(isTabsCollapsed, gestureThresholdPx) {
@@ -121,7 +122,7 @@ internal fun HomeTopTabChrome(
                 .fillMaxSize()
                 .padding(horizontal = tabHorizontalPadding, vertical = tabVerticalPadding)
                 .then(
-                    if (isTabFloating) {
+                    if (drawChromeSurface && isTabFloating) {
                         Modifier.shadow(
                             elevation = effectiveTabShadowElevation,
                             shape = tabShape,
@@ -132,23 +133,28 @@ internal fun HomeTopTabChrome(
                         Modifier
                     }
                 )
-                .clip(tabShape)
-                .homeTopChromeSurface(
-                    renderMode = tabChromeRenderMode,
-                    shape = tabShape,
-                    surfaceColor = tabSurfaceColor,
-                    hazeState = hazeState,
-                    backdrop = backdrop,
-                    liquidStyle = liquidStyle,
-                    liquidGlassTuning = liquidGlassTuning,
-                    motionTier = motionTier,
-                    isScrolling = isScrolling,
-                    isTransitionRunning = isTransitionRunning,
-                    forceLowBlurBudget = forceLowBlurBudget,
-                    preferFlatGlass = preferFlatGlass
+                .then(
+                    if (drawChromeSurface) {
+                        Modifier.homeTopChromeSurface(
+                            renderMode = tabChromeRenderMode,
+                            shape = tabShape,
+                            surfaceColor = tabSurfaceColor,
+                            hazeState = hazeState,
+                            backdrop = backdrop,
+                            liquidStyle = liquidStyle,
+                            liquidGlassTuning = liquidGlassTuning,
+                            motionTier = motionTier,
+                            isScrolling = isScrolling,
+                            isTransitionRunning = isTransitionRunning,
+                            forceLowBlurBudget = forceLowBlurBudget,
+                            preferFlatGlass = preferFlatGlass
+                        )
+                    } else {
+                        Modifier
+                    }
                 )
                 .then(
-                    if (isTabFloating) {
+                    if (drawChromeSurface && isTabFloating) {
                         Modifier.border(
                             width = 0.8.dp,
                             color = Color.White.copy(alpha = tabBorderAlpha),
@@ -160,25 +166,28 @@ internal fun HomeTopTabChrome(
                 )
                 .graphicsLayer { alpha = tabContentAlpha }
         ) {
-            Box(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .background(tabContentUnderlayColor)
-            )
-            if (isTabFloating) {
+            if (drawChromeSurface) {
                 Box(
                     modifier = Modifier
-                        .fillMaxWidth()
-                        .height(16.dp)
-                        .background(
-                            Brush.verticalGradient(
-                                colors = listOf(
-                                    tabHighlightColor,
-                                    Color.Transparent
-                                )
-                            )
-                        )
+                        .fillMaxSize()
+                        .background(tabContentUnderlayColor, tabShape)
                 )
+                if (isTabFloating) {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(16.dp)
+                            .background(
+                                brush = Brush.verticalGradient(
+                                    colors = listOf(
+                                        tabHighlightColor,
+                                        Color.Transparent
+                                    )
+                                ),
+                                shape = tabShape
+                            )
+                    )
+                }
             }
             content()
         }
@@ -195,7 +204,7 @@ private fun BoxScope.CollapsedTopTabHandle() {
         modifier = Modifier
             .align(Alignment.Center)
             .size(width = 34.dp, height = 4.dp)
-            .clip(RoundedCornerShape(999.dp))
+            .clip(AppShapes.container(ContainerLevel.Pill))
             .background(MaterialTheme.colorScheme.onSurface.copy(alpha = 0.28f))
     )
 }

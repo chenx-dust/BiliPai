@@ -2,6 +2,7 @@ package com.android.purebilibili.feature.video.screen
 
 import com.android.purebilibili.core.store.PortraitPlayerCollapseMode
 import kotlin.math.max
+import kotlin.math.min
 
 internal data class PortraitInlinePlayerLayoutSpec(
     val widthDp: Float,
@@ -11,7 +12,10 @@ internal data class PortraitInlinePlayerLayoutSpec(
 internal data class StandalonePortraitPagerMotionSpec(
     val enterDurationMillis: Int,
     val exitDurationMillis: Int,
-    val exitScaleTarget: Float
+    val exitScaleTarget: Float,
+    val exitTranslateUpFraction: Float,
+    val inlineReturnDurationMillis: Int,
+    val inlineReturnInitialScale: Float
 )
 
 internal enum class PortraitFullscreenButtonAction {
@@ -50,17 +54,22 @@ internal fun shouldActivatePortraitFullscreenState(
 internal fun resolveStandalonePortraitPagerMotionSpec(): StandalonePortraitPagerMotionSpec {
     return StandalonePortraitPagerMotionSpec(
         enterDurationMillis = 220,
-        exitDurationMillis = 180,
-        exitScaleTarget = 0.98f
+        exitDurationMillis = 220,
+        exitScaleTarget = 0.96f,
+        exitTranslateUpFraction = 0.08f,
+        inlineReturnDurationMillis = 240,
+        inlineReturnInitialScale = 0.985f
     )
 }
 
 internal fun shouldEnableInlinePortraitScrollTransform(
     collapseMode: PortraitPlayerCollapseMode,
     selectedTabIndex: Int,
-    isVerticalVideo: Boolean = true
+    isVerticalVideo: Boolean = true,
+    isPlaybackPaused: Boolean = false
 ): Boolean {
     if (!collapseMode.enablesVideoOrientation(isVerticalVideo)) return false
+    if (collapseMode == PortraitPlayerCollapseMode.PAUSED_ONLY && !isPlaybackPaused) return false
     return when (selectedTabIndex) {
         0 -> collapseMode.enablesIntro
         1 -> collapseMode.enablesComment
@@ -69,7 +78,7 @@ internal fun shouldEnableInlinePortraitScrollTransform(
 }
 
 internal fun shouldAnimateStandalonePortraitPager(useSharedPlayer: Boolean): Boolean {
-    return !useSharedPlayer
+    return true
 }
 
 internal fun resolvePortraitFullscreenButtonAction(
@@ -83,19 +92,16 @@ internal fun shouldUseCompactInlinePortraitPlayerForCommentTab(
     selectedTabIndex: Int,
     isPortraitFullscreen: Boolean,
     isCommentThreadVisible: Boolean = false,
-    firstVisibleItemIndex: Int = 0,
-    firstVisibleItemScrollOffset: Int = 0,
     collapseMode: PortraitPlayerCollapseMode = PortraitPlayerCollapseMode.BOTH,
     isVerticalVideo: Boolean = true,
-    commentScrollThresholdPx: Int = 56
+    isPlaybackPaused: Boolean = false
 ): Boolean {
     if (!useOfficialInlinePortraitDetailExperience || isPortraitFullscreen) return false
     if (!collapseMode.enablesVideoOrientation(isVerticalVideo)) return false
     if (!collapseMode.enablesComment) return false
+    if (collapseMode == PortraitPlayerCollapseMode.PAUSED_ONLY) return false
     if (isCommentThreadVisible) return true
-    if (selectedTabIndex != 1) return false
-    if (firstVisibleItemIndex > 0) return true
-    return firstVisibleItemScrollOffset >= commentScrollThresholdPx
+    return selectedTabIndex == 1
 }
 
 internal fun shouldUseCompactInlinePortraitPlayerForIntroScroll(
@@ -106,10 +112,12 @@ internal fun shouldUseCompactInlinePortraitPlayerForIntroScroll(
     firstVisibleItemScrollOffset: Int,
     collapseMode: PortraitPlayerCollapseMode = PortraitPlayerCollapseMode.BOTH,
     isVerticalVideo: Boolean = true,
+    isPlaybackPaused: Boolean = false,
     introScrollThresholdPx: Int = 56
 ): Boolean {
     if (!useOfficialInlinePortraitDetailExperience || isPortraitFullscreen) return false
     if (!collapseMode.enablesVideoOrientation(isVerticalVideo)) return false
+    if (collapseMode == PortraitPlayerCollapseMode.PAUSED_ONLY && !isPlaybackPaused) return false
     if (!collapseMode.enablesIntro) return false
     if (selectedTabIndex != 0) return false
     if (firstVisibleItemIndex > 0) return true
@@ -123,6 +131,12 @@ internal fun resolveInlinePortraitPlayerCollapseProgress(
     return manualCollapseProgress
         .coerceIn(0f, 1f)
         .coerceAtLeast(compactForCommentTabProgress.coerceIn(0f, 1f))
+}
+
+internal fun resolveInlinePortraitPlayerCommentCollapseDurationMillis(
+    tabSwitchAnimationSpec: VideoContentTabSwitchAnimationSpec
+): Int {
+    return tabSwitchAnimationSpec.durationMs
 }
 
 internal fun resolvePortraitInlinePlayerLayoutSpec(
@@ -139,7 +153,13 @@ internal fun resolvePortraitInlinePlayerLayoutSpec(
         )
     }
 
-    val expandedHeight = max(screenHeightDp * 0.65f, screenWidthDp)
+    val isWidePortraitWindow = screenWidthDp >= 600f && screenHeightDp > screenWidthDp
+    val expandedHeight = if (isWidePortraitWindow) {
+        // 折叠屏内屏竖屏窗口不能按手机竖屏体验撑满首屏，否则详情区入口会被播放器挤出。
+        min(max(screenHeightDp * 0.52f, collapsedHeight), screenWidthDp)
+    } else {
+        max(screenHeightDp * 0.65f, screenWidthDp)
+    }
     return PortraitInlinePlayerLayoutSpec(
         widthDp = width,
         heightDp = expandedHeight

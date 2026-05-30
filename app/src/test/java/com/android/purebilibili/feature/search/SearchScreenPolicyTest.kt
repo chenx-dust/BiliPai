@@ -2,6 +2,7 @@ package com.android.purebilibili.feature.search
 
 import com.android.purebilibili.data.model.response.SearchType
 import com.android.purebilibili.data.repository.SearchUpOrder
+import java.io.File
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
@@ -137,5 +138,143 @@ class SearchScreenPolicyTest {
                 currentUpOrder = SearchUpOrder.DEFAULT
             )
         )
+    }
+
+    @Test
+    fun searchTypeTabs_useCompactDensityOnNarrowScreens() {
+        val compact = resolveSearchTypeTabLayoutSpec(widthDp = 360)
+        val regular = resolveSearchTypeTabLayoutSpec(widthDp = 412)
+
+        assertEquals(6, compact.horizontalSpacingDp)
+        assertEquals(10, compact.horizontalPaddingDp)
+        assertEquals(13, compact.fontSizeSp)
+        assertEquals(36, compact.minHeightDp)
+
+        assertEquals(8, regular.horizontalSpacingDp)
+        assertEquals(16, regular.horizontalPaddingDp)
+        assertEquals(14, regular.fontSizeSp)
+        assertEquals(40, regular.minHeightDp)
+    }
+
+    @Test
+    fun searchResultSwipe_switchesToAdjacentSearchType() {
+        assertEquals(
+            SearchType.VIDEO,
+            resolveSearchSwipeTargetType(
+                currentType = SearchType.UP,
+                dragDistancePx = 120f
+            )
+        )
+        assertEquals(
+            SearchType.BANGUMI,
+            resolveSearchSwipeTargetType(
+                currentType = SearchType.UP,
+                dragDistancePx = -120f
+            )
+        )
+        assertEquals(
+            SearchType.UP,
+            resolveSearchSwipeTargetType(
+                currentType = SearchType.VIDEO,
+                dragDistancePx = -120f
+            )
+        )
+    }
+
+    @Test
+    fun searchResultSwipe_ignoresWeakDragAndClampsEdges() {
+        assertEquals(
+            null,
+            resolveSearchSwipeTargetType(
+                currentType = SearchType.UP,
+                dragDistancePx = -40f
+            )
+        )
+        assertEquals(
+            null,
+            resolveSearchSwipeTargetType(
+                currentType = SearchType.VIDEO,
+                dragDistancePx = 120f
+            )
+        )
+        assertEquals(
+            null,
+            resolveSearchSwipeTargetType(
+                currentType = SearchType.PHOTO,
+                dragDistancePx = -120f
+            )
+        )
+    }
+
+    @Test
+    fun bottomBarSearchEntry_usesDedicatedTopBarContinuityMotion() {
+        val navigationSource = loadSource("app/src/main/java/com/android/purebilibili/navigation/AppNavigation.kt")
+        val searchSource = loadSource("app/src/main/java/com/android/purebilibili/feature/search/SearchScreen.kt")
+
+        assertTrue(navigationSource.contains("fun navigateToSearchFromBottomBar()"))
+        assertTrue(navigationSource.contains("fun requestSearchFromBottomBar()"))
+        assertTrue(navigationSource.contains("bottomBarSearchLaunchKey += 1"))
+        assertTrue(navigationSource.contains("pendingBottomBarSearchLaunchKey = bottomBarSearchLaunchKey"))
+        assertTrue(navigationSource.contains("onSearchClick = { requestSearchFromBottomBar() }"))
+        assertTrue(navigationSource.contains("searchLaunchKey = bottomBarSearchLaunchKey"))
+        assertTrue(navigationSource.contains("onSearchLaunchTransitionFinished = { completedKey ->"))
+        assertTrue(navigationSource.contains("if (pendingBottomBarSearchLaunchKey == completedKey)"))
+        assertTrue(navigationSource.contains("searchEntryMotionSource = SearchEntryMotionSource.BOTTOM_BAR"))
+        assertTrue(navigationSource.contains("searchEntryMotionKey += 1"))
+        assertTrue(navigationSource.contains("entryMotionSource = searchEntryMotionSource"))
+        assertTrue(navigationSource.contains("entryMotionKey = searchEntryMotionKey"))
+
+        assertTrue(searchSource.contains("entryMotionSource: SearchEntryMotionSource = SearchEntryMotionSource.NONE"))
+        assertTrue(searchSource.contains("entryMotionSpec = resolveSearchEntryMotionSpec("))
+        assertTrue(searchSource.contains("entryMotionKey = entryMotionKey"))
+        assertTrue(searchSource.contains("graphicsLayer"))
+        assertTrue(searchSource.contains("TransformOrigin("))
+        assertTrue(searchSource.contains("spec.transformOriginPivotX"))
+        assertTrue(searchSource.contains("spec.transformOriginPivotY"))
+    }
+
+    @Test
+    fun searchEntryMotion_onlyRunsForBottomBarSourceAndRespectsReducedBudget() {
+        assertEquals(
+            null,
+            resolveSearchEntryMotionSpec(
+                source = SearchEntryMotionSource.NONE,
+                reducedMotionBudget = false
+            )
+        )
+
+        val bottomBarSpec = requireNotNull(
+            resolveSearchEntryMotionSpec(
+                source = SearchEntryMotionSource.BOTTOM_BAR,
+                reducedMotionBudget = false
+            )
+        )
+        assertEquals(320, bottomBarSpec.durationMillis)
+        assertEquals(0.58f, bottomBarSpec.initialAlpha)
+        assertEquals(0.88f, bottomBarSpec.initialScale)
+        assertEquals(360f, bottomBarSpec.initialTranslationYDp)
+        assertEquals(0.5f, bottomBarSpec.transformOriginPivotX)
+        assertEquals(1f, bottomBarSpec.transformOriginPivotY)
+
+        val reducedSpec = requireNotNull(
+            resolveSearchEntryMotionSpec(
+                source = SearchEntryMotionSource.BOTTOM_BAR,
+                reducedMotionBudget = true
+            )
+        )
+        assertEquals(0, reducedSpec.durationMillis)
+        assertEquals(1f, reducedSpec.initialAlpha)
+        assertEquals(1f, reducedSpec.initialScale)
+        assertEquals(0f, reducedSpec.initialTranslationYDp)
+    }
+
+    private fun loadSource(path: String): String {
+        val normalizedPath = path.removePrefix("app/")
+        val sourceFile = listOf(
+            File(path),
+            File(normalizedPath)
+        ).firstOrNull { it.exists() }
+        require(sourceFile != null) { "Cannot locate $path from ${File(".").absolutePath}" }
+        return sourceFile.readText()
     }
 }

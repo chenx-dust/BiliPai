@@ -2,10 +2,28 @@ package com.android.purebilibili.feature.bangumi
 
 import com.android.purebilibili.data.model.response.BangumiDetail
 
+internal const val BANGUMI_HEARTBEAT_INTERVAL_MS = 15_000L
+
 internal data class BangumiResumeTarget(
     val epId: Long,
     val resumePositionMs: Long
 )
+
+internal data class BangumiDetailRequest(
+    val seasonId: Long,
+    val epId: Long
+)
+
+internal fun resolveBangumiDetailRequest(
+    seasonId: Long,
+    epId: Long
+): BangumiDetailRequest {
+    return if (epId > 0L) {
+        BangumiDetailRequest(seasonId = 0L, epId = epId)
+    } else {
+        BangumiDetailRequest(seasonId = seasonId.coerceAtLeast(0L), epId = 0L)
+    }
+}
 
 internal fun resolveBangumiAutoResumeTarget(
     detail: BangumiDetail,
@@ -38,5 +56,5 @@ internal fun shouldSendBangumiPlaybackHeartbeat(
     return isPlaying &&
         bvid.isNotBlank() &&
         cid > 0L &&
-        currentPositionMs > 0L
+        currentPositionMs >= 0L
 }

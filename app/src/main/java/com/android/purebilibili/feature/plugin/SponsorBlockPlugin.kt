@@ -3,22 +3,35 @@ package com.android.purebilibili.feature.plugin
 
 import android.content.Context
 import androidx.compose.foundation.background
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
 //  Cupertino Icons - iOS SF Symbols 风格图标
 import io.github.alexzhirkevich.cupertino.icons.CupertinoIcons
 import io.github.alexzhirkevich.cupertino.icons.outlined.*
 import io.github.alexzhirkevich.cupertino.icons.filled.*
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.platform.UriHandler
 import androidx.compose.ui.platform.LocalUriHandler
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
+import coil.compose.AsyncImage
+import coil.request.ImageRequest
 import com.android.purebilibili.core.plugin.PlayerPluginApi
 import com.android.purebilibili.core.plugin.PluginCapability
 import com.android.purebilibili.core.plugin.PluginCapabilityManifest
@@ -27,7 +40,8 @@ import com.android.purebilibili.core.plugin.PluginStore
 import com.android.purebilibili.core.plugin.SkipAction
 import com.android.purebilibili.core.ui.components.*
 import com.android.purebilibili.core.util.Logger
-import com.android.purebilibili.core.store.SettingsManager
+import com.android.purebilibili.core.util.FormatUtils
+import com.android.purebilibili.core.util.rememberNotificationPermissionState
 import com.android.purebilibili.data.model.response.SponsorBlockMarkerMode
 import com.android.purebilibili.data.model.response.SponsorSegment
 import com.android.purebilibili.data.model.response.SponsorProgressMarker
@@ -41,9 +55,14 @@ import kotlinx.serialization.json.Json
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.decodeFromString
 import kotlinx.coroutines.flow.first
+import java.time.Instant
+import java.time.ZoneId
+import java.time.format.DateTimeFormatter
 
 private const val TAG = "SponsorBlockPlugin"
 const val SPONSOR_BLOCK_PLUGIN_ID = "sponsor_block"
+private val PLUGIN_EVENT_TIME_FORMATTER: DateTimeFormatter =
+    DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss")
 
 internal fun normalizeSponsorSegments(
     segments: List<SponsorSegment>
@@ -259,7 +278,10 @@ class SponsorBlockPlugin : PlayerPluginApi {
             )
             return SkipAction.SkipTo(
                 positionMs = segment.endTimeMs,
-                reason = "已跳过: ${segment.categoryName}"
+                reason = "已跳过: ${segment.categoryName}",
+                segmentId = segment.UUID,
+                startMs = segment.startTimeMs,
+                categoryName = segment.categoryName
             )
         }
         
@@ -291,9 +313,11 @@ class SponsorBlockPlugin : PlayerPluginApi {
     }
     
     /** 手动跳过时调用，标记片段已跳过 */
-    fun markAsSkipped(segmentId: String) {
+    fun markAsSkipped(segmentId: String): SponsorSegment? {
         skippedIds.add(segmentId)
+        val segment = segments.firstOrNull { it.UUID == segmentId }
         Logger.d(TAG, " 手动跳过完成: $segmentId")
+        return segment
     }
 
     fun getProgressMarkers(): List<SponsorProgressMarker> = progressMarkers
@@ -338,6 +362,9 @@ class SponsorBlockPlugin : PlayerPluginApi {
         val scope = rememberCoroutineScope()
         var autoSkip by remember { mutableStateOf(config.autoSkip) }
         var markerMode by remember { mutableStateOf(config.markerMode) }
+        var dailySummaryNotificationEnabled by remember { mutableStateOf(config.dailySummaryNotificationEnabled) }
+        var dailySummaryNotificationPrefix by remember { mutableStateOf(config.dailySummaryNotificationPrefix) }
+        var insightRecords by remember { mutableStateOf<List<SponsorBlockSkipRecord>>(emptyList()) }
         val aboutItem = remember { resolveSponsorBlockAboutItemModel() }
         val markerOptions = remember {
             SponsorBlockMarkerMode.entries.map { mode ->
@@ -347,12 +374,43 @@ class SponsorBlockPlugin : PlayerPluginApi {
                 )
             }
         }
+        val insightSummary = remember(insightRecords) {
+            resolveSponsorBlockInsightSummary(
+                records = insightRecords,
+                dayStartMs = currentLocalDayStartMs()
+            )
+        }
+        fun persistConfig(nextConfig: SponsorBlockConfig) {
+            config = nextConfig.normalized()
+            scope.launch {
+                PluginStore.setConfigJson(context, id, Json.encodeToString(config))
+                scheduleSponsorBlockDailySummary(context, config.dailySummaryNotificationEnabled)
+            }
+        }
+        fun showNotificationToast(message: String) {
+            android.widget.Toast.makeText(context, message, android.widget.Toast.LENGTH_SHORT).show()
+        }
+        fun sendTestNotification() {
+            val posted = postSponsorBlockTestNotification(context, config)
+            showNotificationToast(if (posted) "测试通知已发送" else "系统通知未开启")
+        }
+        val notificationPermission = rememberNotificationPermissionState { granted ->
+            if (granted) {
+                sendTestNotification()
+            } else {
+                showNotificationToast("通知权限未开启")
+            }
+        }
         
         // 加载配置
         LaunchedEffect(Unit) {
             loadConfigSuspend()
             autoSkip = config.autoSkip
             markerMode = config.markerMode
+            dailySummaryNotificationEnabled = config.dailySummaryNotificationEnabled
+            dailySummaryNotificationPrefix = config.dailySummaryNotificationPrefix
+            insightRecords = SponsorBlockInsightStore.readRecords(context)
+            scheduleSponsorBlockDailySummary(context, config.dailySummaryNotificationEnabled)
         }
         
         Column(
@@ -361,6 +419,10 @@ class SponsorBlockPlugin : PlayerPluginApi {
                 .padding(16.dp),
             verticalArrangement = Arrangement.spacedBy(0.dp)
         ) {
+            SponsorBlockInsightPanel(summary = insightSummary)
+
+            Spacer(modifier = Modifier.height(12.dp))
+
             // 使用原设置组件 - 自动跳过
             IOSSwitchItem(
                 icon = CupertinoIcons.Default.Bolt,
@@ -369,12 +431,9 @@ class SponsorBlockPlugin : PlayerPluginApi {
                 checked = autoSkip,
                 onCheckedChange = { newValue ->
                     autoSkip = newValue
-                    config = config.copy(autoSkip = newValue)
-                    scope.launch {
-                        PluginStore.setConfigJson(context, id, Json.encodeToString(config))
-                    }
+                    persistConfig(config.copy(autoSkip = newValue))
                 },
-                iconTint = androidx.compose.ui.graphics.Color(0xFFFF9800) // iOS Orange
+                iconTint = Color(0xFFFF9800) // iOS Orange
             )
 
             androidx.compose.material3.HorizontalDivider(
@@ -389,15 +448,57 @@ class SponsorBlockPlugin : PlayerPluginApi {
                 selectedValue = markerMode,
                 onSelectionChange = { newValue ->
                     markerMode = newValue
-                    config = config.copy(markerModeRaw = newValue.name)
+                    persistConfig(config.copy(markerModeRaw = newValue.name))
                     progressMarkers = resolveSponsorProgressMarkers(
                         segments = segments,
                         markerMode = newValue
                     )
-                    scope.launch {
-                        PluginStore.setConfigJson(context, id, Json.encodeToString(config))
-                    }
                 }
+            )
+
+            androidx.compose.material3.HorizontalDivider(
+                modifier = Modifier.padding(start = 56.dp),
+                color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f)
+            )
+
+            IOSSwitchItem(
+                icon = CupertinoIcons.Default.Bell,
+                title = "每日汇总通知",
+                subtitle = "当天有跳过记录时，汇总跳过次数和节省时间",
+                checked = dailySummaryNotificationEnabled,
+                onCheckedChange = { newValue ->
+                    dailySummaryNotificationEnabled = newValue
+                    persistConfig(config.copy(dailySummaryNotificationEnabled = newValue))
+                },
+                iconTint = Color(0xFF34C759)
+            )
+
+            if (dailySummaryNotificationEnabled) {
+                OutlinedTextField(
+                    value = dailySummaryNotificationPrefix,
+                    onValueChange = { nextValue ->
+                        dailySummaryNotificationPrefix = nextValue
+                        persistConfig(config.copy(dailySummaryNotificationPrefix = nextValue))
+                    },
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(start = 56.dp, top = 8.dp, bottom = 12.dp),
+                    singleLine = true,
+                    label = { Text("通知文案前缀") },
+                    textStyle = MaterialTheme.typography.bodyMedium
+                )
+            }
+
+            IOSClickableItem(
+                icon = CupertinoIcons.Default.Bell,
+                title = "发送测试通知",
+                subtitle = "确认空降助手通知权限和展示效果，不写入跳过记录",
+                onClick = {
+                    notificationPermission.launchWithPermission {
+                        sendTestNotification()
+                    }
+                },
+                iconTint = Color(0xFF34C759)
             )
             
             androidx.compose.material3.HorizontalDivider(
@@ -412,9 +513,409 @@ class SponsorBlockPlugin : PlayerPluginApi {
                 subtitle = aboutItem.subtitle,
                 value = aboutItem.value,
                 onClick = { uriHandler.openUri("https://github.com/hanydd/BilibiliSponsorBlock") },
-                iconTint = androidx.compose.ui.graphics.Color(0xFF2196F3) // iOS Blue
+                iconTint = Color(0xFF2196F3) // iOS Blue
             )
         }
+    }
+}
+
+@Composable
+private fun SponsorBlockInsightPanel(summary: SponsorBlockInsightSummary) {
+    BoxWithConstraints(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(18.dp))
+            .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.42f))
+            .padding(14.dp)
+    ) {
+        val useWideLayout = maxWidth >= 460.dp
+        if (useWideLayout) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(12.dp)
+            ) {
+                SponsorBlockSummaryRail(
+                    summary = summary,
+                    modifier = Modifier.widthIn(min = 156.dp, max = 190.dp)
+                )
+                SponsorBlockRecentSection(
+                    summary = summary,
+                    modifier = Modifier.weight(1f)
+                )
+            }
+        } else {
+            Column(
+                modifier = Modifier.fillMaxWidth(),
+                verticalArrangement = Arrangement.spacedBy(10.dp)
+            ) {
+                SponsorBlockSummaryHeader(summary = summary)
+                SponsorBlockCompactStats(summary = summary)
+                SponsorBlockRecentSection(summary = summary)
+            }
+        }
+    }
+}
+
+@Composable
+private fun SponsorBlockSummaryRail(
+    summary: SponsorBlockInsightSummary,
+    modifier: Modifier = Modifier
+) {
+    Column(
+        modifier = modifier,
+        verticalArrangement = Arrangement.spacedBy(8.dp)
+    ) {
+        SponsorBlockSummaryHeader(summary = summary)
+        SponsorBlockStatTile(
+            title = "今日节省",
+            value = summary.todaySavedText,
+            modifier = Modifier.fillMaxWidth()
+        )
+        SponsorBlockStatTile(
+            title = "累计节省",
+            value = summary.totalSavedText,
+            modifier = Modifier.fillMaxWidth()
+        )
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            SponsorBlockStatTile(
+                title = "次数",
+                value = "${summary.totalSkipCount}",
+                modifier = Modifier.weight(1f)
+            )
+            SponsorBlockStatTile(
+                title = "UP",
+                value = "${summary.uniqueUpCount}",
+                modifier = Modifier.weight(1f)
+            )
+        }
+    }
+}
+
+@Composable
+private fun SponsorBlockSummaryHeader(summary: SponsorBlockInsightSummary) {
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Column(
+            modifier = Modifier.weight(1f),
+            verticalArrangement = Arrangement.spacedBy(2.dp)
+        ) {
+            Text(
+                text = "跳过统计",
+                style = MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.SemiBold,
+                color = MaterialTheme.colorScheme.onSurface
+            )
+            Text(
+                text = "记录只保存在本地",
+                style = MaterialTheme.typography.labelMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
+            )
+        }
+        Box(
+            modifier = Modifier
+                .clip(RoundedCornerShape(999.dp))
+                .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.12f))
+                .padding(horizontal = 10.dp, vertical = 5.dp)
+        ) {
+            Text(
+                text = "${summary.totalSkipCount} 次",
+                style = MaterialTheme.typography.labelMedium,
+                color = MaterialTheme.colorScheme.primary,
+                fontWeight = FontWeight.Medium
+            )
+        }
+    }
+}
+
+@Composable
+private fun SponsorBlockCompactStats(summary: SponsorBlockInsightSummary) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(12.dp))
+            .background(MaterialTheme.colorScheme.surface.copy(alpha = 0.72f))
+            .padding(horizontal = 10.dp, vertical = 9.dp),
+        horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        SponsorBlockCompactStatItem(
+            title = "今日",
+            value = summary.todaySavedText,
+            modifier = Modifier.weight(1f)
+        )
+        SponsorBlockCompactStatItem(
+            title = "累计",
+            value = summary.totalSavedText,
+            modifier = Modifier.weight(1f)
+        )
+        SponsorBlockCompactStatItem(
+            title = "次数",
+            value = "${summary.totalSkipCount}",
+            modifier = Modifier.weight(1f)
+        )
+        SponsorBlockCompactStatItem(
+            title = "UP",
+            value = "${summary.uniqueUpCount}",
+            modifier = Modifier.weight(1f)
+        )
+    }
+}
+
+@Composable
+private fun SponsorBlockCompactStatItem(
+    title: String,
+    value: String,
+    modifier: Modifier = Modifier
+) {
+    Column(
+        modifier = modifier,
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.spacedBy(2.dp)
+    ) {
+        Text(
+            text = title,
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            maxLines = 1
+        )
+        Text(
+            text = value,
+            style = MaterialTheme.typography.labelLarge,
+            color = MaterialTheme.colorScheme.onSurface,
+            fontWeight = FontWeight.SemiBold,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis
+        )
+    }
+}
+
+@Composable
+private fun SponsorBlockRecentSection(
+    summary: SponsorBlockInsightSummary,
+    modifier: Modifier = Modifier
+) {
+    Column(
+        modifier = modifier,
+        verticalArrangement = Arrangement.spacedBy(8.dp)
+    ) {
+        if (summary.recentRecords.isEmpty()) {
+            SponsorBlockEmptyInsight()
+        } else {
+            Text(
+                text = "最近跳过",
+                style = MaterialTheme.typography.labelLarge,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                fontWeight = FontWeight.Medium
+            )
+            summary.recentRecords.forEach { record ->
+                SponsorBlockRecordRow(record = record)
+            }
+        }
+    }
+}
+
+@Composable
+private fun SponsorBlockStatTile(
+    title: String,
+    value: String,
+    modifier: Modifier = Modifier
+) {
+    Column(
+        modifier = modifier
+            .clip(RoundedCornerShape(12.dp))
+            .background(MaterialTheme.colorScheme.surface.copy(alpha = 0.72f))
+            .padding(horizontal = 12.dp, vertical = 10.dp),
+        verticalArrangement = Arrangement.spacedBy(4.dp)
+    ) {
+        Text(
+            text = title,
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
+        Text(
+            text = value,
+            style = MaterialTheme.typography.titleSmall,
+            fontWeight = FontWeight.SemiBold,
+            color = MaterialTheme.colorScheme.onSurface
+        )
+    }
+}
+
+@Composable
+private fun SponsorBlockEmptyInsight() {
+    Box(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(12.dp))
+            .background(MaterialTheme.colorScheme.surface.copy(alpha = 0.62f))
+            .padding(horizontal = 14.dp, vertical = 18.dp),
+        contentAlignment = Alignment.Center
+    ) {
+        Text(
+            text = "还没有跳过记录",
+            style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
+    }
+}
+
+@Composable
+private fun SponsorBlockRecordRow(record: SponsorBlockSkipRecord) {
+    val context = LocalContext.current
+    var showDetailDialog by remember(record.timestampMs, record.segmentId) { mutableStateOf(false) }
+    if (showDetailDialog) {
+        SponsorBlockRecordDetailDialog(
+            record = record,
+            onDismiss = { showDetailDialog = false }
+        )
+    }
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(12.dp))
+            .background(MaterialTheme.colorScheme.surface.copy(alpha = 0.7f))
+            .combinedClickable(
+                onClick = {},
+                onLongClick = { showDetailDialog = true }
+            )
+            .padding(8.dp),
+        horizontalArrangement = Arrangement.spacedBy(10.dp)
+    ) {
+        AsyncImage(
+            model = ImageRequest.Builder(context)
+                .data(FormatUtils.fixImageUrl(record.videoCoverUrl))
+                .crossfade(true)
+                .build(),
+            contentDescription = null,
+            contentScale = ContentScale.Crop,
+            modifier = Modifier
+                .width(92.dp)
+                .aspectRatio(16f / 9f)
+                .clip(RoundedCornerShape(8.dp))
+                .background(MaterialTheme.colorScheme.surfaceVariant)
+        )
+        Column(
+            modifier = Modifier.weight(1f),
+            verticalArrangement = Arrangement.spacedBy(6.dp)
+        ) {
+            Text(
+                text = record.videoTitle.ifBlank { "未知视频" },
+                style = MaterialTheme.typography.bodyMedium,
+                fontWeight = FontWeight.Medium,
+                color = MaterialTheme.colorScheme.onSurface,
+                maxLines = 2,
+                overflow = TextOverflow.Ellipsis
+            )
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(6.dp)
+            ) {
+                AsyncImage(
+                    model = ImageRequest.Builder(context)
+                        .data(FormatUtils.fixImageUrl(record.upFaceUrl))
+                        .crossfade(true)
+                        .build(),
+                    contentDescription = null,
+                    contentScale = ContentScale.Crop,
+                    modifier = Modifier
+                        .size(20.dp)
+                        .clip(CircleShape)
+                        .background(MaterialTheme.colorScheme.surfaceVariant)
+                )
+                Text(
+                    text = record.upName.ifBlank { "未知 UP" },
+                    style = MaterialTheme.typography.labelMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
+            }
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(6.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                SponsorBlockChip(text = record.segmentCategoryName)
+                SponsorBlockChip(text = record.triggerLabel)
+            }
+            Text(
+                text = "${record.progressText}  ·  节省 ${record.savedText}",
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+        }
+    }
+}
+
+@Composable
+private fun SponsorBlockRecordDetailDialog(
+    record: SponsorBlockSkipRecord,
+    onDismiss: () -> Unit
+) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("跳过详情") },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                SponsorBlockDetailLine("视频", record.videoTitle.ifBlank { "未知视频" })
+                SponsorBlockDetailLine("UP 主", record.upName.ifBlank { "未知 UP" })
+                SponsorBlockDetailLine("片段类型", record.segmentCategoryName)
+                SponsorBlockDetailLine("来源", record.triggerLabel)
+                SponsorBlockDetailLine("跳转区间", record.progressText)
+                SponsorBlockDetailLine("节省时间", record.savedText)
+                SponsorBlockDetailLine("跳过时间", formatPluginEventTime(record.timestampMs))
+                if (record.bvid.isNotBlank()) {
+                    SponsorBlockDetailLine("BVID", record.bvid)
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = onDismiss) {
+                Text("知道了")
+            }
+        }
+    )
+}
+
+@Composable
+private fun SponsorBlockDetailLine(
+    label: String,
+    value: String
+) {
+    Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+        Text(
+            text = label,
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
+        Text(
+            text = value,
+            style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.onSurface
+        )
+    }
+}
+
+@Composable
+private fun SponsorBlockChip(text: String) {
+    Box(
+        modifier = Modifier
+            .clip(RoundedCornerShape(999.dp))
+            .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.1f))
+            .padding(horizontal = 8.dp, vertical = 3.dp)
+    ) {
+        Text(
+            text = text,
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.primary,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis
+        )
     }
 }
 
@@ -428,7 +929,9 @@ data class SponsorBlockConfig(
     val skipSponsor: Boolean = true,
     val skipIntro: Boolean = true,
     val skipOutro: Boolean = true,
-    val skipInteraction: Boolean = true
+    val skipInteraction: Boolean = true,
+    val dailySummaryNotificationEnabled: Boolean = false,
+    val dailySummaryNotificationPrefix: String = DEFAULT_DAILY_SUMMARY_PREFIX
 ) {
     val markerMode: SponsorBlockMarkerMode
         get() = com.android.purebilibili.data.model.response.resolveSponsorBlockMarkerMode(markerModeRaw)
@@ -436,6 +939,8 @@ data class SponsorBlockConfig(
     fun normalized(): SponsorBlockConfig = copy(markerModeRaw = markerMode.name)
 
     companion object {
+        const val DEFAULT_DAILY_SUMMARY_PREFIX = "今日空降助手已帮你节省"
+
         fun default(): SponsorBlockConfig = SponsorBlockConfig()
     }
 }
@@ -446,3 +951,9 @@ private val SponsorBlockMarkerMode.label: String
         SponsorBlockMarkerMode.SPONSOR_ONLY -> "仅恰饭"
         SponsorBlockMarkerMode.ALL_SKIPPABLE -> "全部可跳过"
     }
+
+private fun formatPluginEventTime(timestampMs: Long): String {
+    return Instant.ofEpochMilli(timestampMs)
+        .atZone(ZoneId.systemDefault())
+        .format(PLUGIN_EVENT_TIME_FORMATTER)
+}

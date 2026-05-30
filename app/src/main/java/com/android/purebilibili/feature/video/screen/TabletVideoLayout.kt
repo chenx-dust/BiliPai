@@ -8,6 +8,7 @@ import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.animation.animateContentSize
 import androidx.compose.material3.*
@@ -28,12 +29,15 @@ import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import com.android.purebilibili.core.ui.AdaptiveSplitLayout
 import com.android.purebilibili.core.util.ShareUtils
+import com.android.purebilibili.data.model.response.BgmInfo
 import com.android.purebilibili.data.model.response.ViewPoint
+import com.android.purebilibili.feature.common.resolveIndexedVideoLazyKey
 import com.android.purebilibili.feature.dynamic.components.ImagePreviewDialog
 import com.android.purebilibili.feature.dynamic.components.ImagePreviewTextContent
 import com.android.purebilibili.feature.video.state.VideoPlayerState
 import com.android.purebilibili.feature.video.ui.components.*
 import com.android.purebilibili.feature.video.ui.section.ActionButtonsRow
+import com.android.purebilibili.feature.video.ui.section.resolveDisplayBgmList
 import com.android.purebilibili.feature.video.ui.section.UpInfoSection
 import com.android.purebilibili.feature.video.ui.section.VideoPlayerSection
 import com.android.purebilibili.feature.video.ui.section.VideoTitleWithDesc
@@ -83,6 +87,7 @@ fun TabletVideoLayout(
     isInPipMode: Boolean,
     onPipClick: () -> Unit,
     isPortraitFullscreen: Boolean = false,
+    onHomeClick: () -> Unit,
 
     // [New] Codec & Audio Params
     currentCodec: String = "hev1", 
@@ -93,8 +98,10 @@ fun TabletVideoLayout(
     onAudioQualityChange: (Int) -> Unit = {},
     transitionEnabled: Boolean = false, //  卡片过渡动画开关
     onRelatedVideoClick: (String, android.os.Bundle?) -> Unit,
+    onBgmClick: (BgmInfo) -> Unit = {},
     showUpBadge: Boolean = true,
     onSearchKeywordClick: (String) -> Unit = {},
+    onOpenBilibiliLink: ((String) -> Unit)? = null,
     // 🔁 [新增] 播放模式
     currentPlayMode: com.android.purebilibili.feature.video.player.PlayMode = com.android.purebilibili.feature.video.player.PlayMode.SEQUENTIAL,
     onPlayModeClick: () -> Unit = {},
@@ -119,6 +126,12 @@ fun TabletVideoLayout(
     
     // 🖥️ [修复] 使用 LocalContext 获取 Activity，而非 playerState.context
     val context = LocalContext.current
+    val commentMemberDecorationsEnabled by com.android.purebilibili.core.store.SettingsManager
+        .getCommentMemberDecorationsEnabled(context)
+        .collectAsState(
+            initial = false,
+            context = kotlin.coroutines.EmptyCoroutineContext
+        )
     val activity = remember(context) {
         (context as? android.app.Activity)
             ?: (context as? android.content.ContextWrapper)?.baseContext as? android.app.Activity
@@ -149,9 +162,9 @@ fun TabletVideoLayout(
                     with(sharedTransitionScope) {
                         Modifier
                             .sharedBounds(
-                                sharedContentState = rememberSharedContentState(key = "video_cover_$bvid"),
+                                sharedContentState = rememberSharedContentState(key = com.android.purebilibili.core.ui.transition.videoCoverSharedElementKey(bvid)),
                                 animatedVisibilityScope = animatedVisibilityScope,
-                                boundsTransform = { _, _ -> com.android.purebilibili.core.theme.AnimationSpecs.BiliPaiSpringSpec },
+                                boundsTransform = { _, _ -> com.android.purebilibili.core.ui.motion.AppMotionTokens.spatialSpec() },
                                 clipInOverlayDuringTransition = OverlayClip(
                                     RoundedCornerShape(12.dp)
                                 )
@@ -183,6 +196,7 @@ fun TabletVideoLayout(
                             onToggleFullscreen = onToggleFullscreen,
                             onQualityChange = { qid -> viewModel.changeQuality(qid) },
                             onBack = onBack,
+                            onHomeClick = onHomeClick,
                             bvid = bvid,
                             coverUrl = coverUrl,
                             onDoubleTapLike = { viewModel.toggleLike() },
@@ -226,7 +240,7 @@ fun TabletVideoLayout(
                 if (uiState is PlayerUiState.Success) {
                     val success = uiState as PlayerUiState.Success
                     val currentPageIndex = success.info.pages.indexOfFirst { it.cid == success.info.cid }.coerceAtLeast(0)
-                    val downloadProgress by viewModel.downloadProgress.collectAsState()
+                    val downloadProgress by viewModel.downloadProgress.collectAsState(context = kotlin.coroutines.EmptyCoroutineContext)
                     
                     ScrollableVideoInfoSection(
                         info = success.info,
@@ -238,9 +252,12 @@ fun TabletVideoLayout(
                         downloadProgress = downloadProgress,
                         isInWatchLater = success.isInWatchLater,
                         videoTags = success.videoTags,
-                        relatedVideos = success.related,
                         ownerFollowerCount = success.ownerFollowerCount,
                         ownerVideoCount = success.ownerVideoCount,
+                        bgmInfo = success.bgmInfo,
+                        bgmInfoList = success.bgmInfoList,
+                        onBgmClick = onBgmClick,
+                        relatedVideos = success.related,
                         onFollowClick = { viewModel.toggleFollow() },
                         onFavoriteClick = { viewModel.toggleFavorite() },
                         onLikeClick = { viewModel.toggleLike() },
@@ -251,6 +268,7 @@ fun TabletVideoLayout(
                         onDownloadClick = { viewModel.openDownloadDialog() },
                         onWatchLaterClick = { viewModel.toggleWatchLater() },
                         onRelatedVideoClick = onRelatedVideoClick,
+                        onOpenBilibiliLink = onOpenBilibiliLink,
                         modifier = Modifier
                             .weight(1f)
                             .fillMaxWidth()
@@ -279,7 +297,9 @@ fun TabletVideoLayout(
                     },
                     onRelatedVideoClick = onRelatedVideoClick,
                     showUpBadge = showUpBadge,
-                    onSearchKeywordClick = onSearchKeywordClick
+                    showIdentityDecorations = commentMemberDecorationsEnabled,
+                    onSearchKeywordClick = onSearchKeywordClick,
+                    onOpenBilibiliLink = onOpenBilibiliLink
                 )
             }
         },
@@ -303,7 +323,9 @@ private fun TabletSecondaryContent(
     onPaneModeCycle: () -> Unit,
     onRelatedVideoClick: (String, android.os.Bundle?) -> Unit,
     showUpBadge: Boolean,
-    onSearchKeywordClick: (String) -> Unit
+    showIdentityDecorations: Boolean,
+    onSearchKeywordClick: (String) -> Unit,
+    onOpenBilibiliLink: ((String) -> Unit)?
 ) {
     val commentAppearance = rememberVideoCommentAppearance()
     var selectedTab by rememberSaveable(success.info.bvid) {
@@ -318,7 +340,7 @@ private fun TabletSecondaryContent(
         initialPage = selectedTab,
         pageCount = { 2 }
     )
-    val subReplyState by commentViewModel.subReplyState.collectAsState()
+    val subReplyState by commentViewModel.subReplyState.collectAsState(context = kotlin.coroutines.EmptyCoroutineContext)
     val tabs = listOf("评论 ${if (commentState.replyCount > 0) "(${commentState.replyCount})" else ""}", "相关推荐")
     
     // 评论图片预览状态
@@ -352,6 +374,10 @@ private fun TabletSecondaryContent(
     val openCommentUrl: (String) -> Unit = openCommentUrl@{ rawUrl ->
         val url = rawUrl.trim()
         if (url.isEmpty()) return@openCommentUrl
+        if (onOpenBilibiliLink != null) {
+            onOpenBilibiliLink(url)
+            return@openCommentUrl
+        }
 
         when (val target = resolveCommentUrlNavigationTarget(url)) {
             is CommentUrlNavigationTarget.Video -> {
@@ -514,6 +540,7 @@ private fun TabletSecondaryContent(
                             onCommentLike = commentViewModel::likeComment,
                             onReportComment = commentViewModel::reportComment,
                             onUrlClick = openCommentUrl,
+                            showIdentityDecorations = showIdentityDecorations,
                             onAvatarClick = { mid -> mid.toLongOrNull()?.let(onUpClick) ?: Unit }
                         )
                     } else {
@@ -571,6 +598,7 @@ private fun TabletSecondaryContent(
                                         emoteMap = success.emoteMap,
                                         upMid = success.info.owner.mid,
                                         showUpFlag = commentState.showUpFlag,
+                                        showIdentityDecorations = showIdentityDecorations,
                                         isPinned = reply.rpid in commentState.pinnedReplyIds,
                                         onClick = {},
                                         onSubClick = { commentViewModel.openSubReply(it) },
@@ -687,10 +715,18 @@ private fun TabletSecondaryContent(
                         modifier = Modifier.fillMaxSize(),
                         contentPadding = PaddingValues(8.dp)
                     ) {
-                        items(
+                        itemsIndexed(
                             items = success.related,
-                            key = { "related_${it.bvid}" }
-                        ) { video ->
+                            key = { index, item ->
+                                resolveIndexedVideoLazyKey(
+                                    namespace = "tablet_related",
+                                    index = index,
+                                    bvid = item.bvid,
+                                    aid = item.aid,
+                                    cid = item.cid
+                                )
+                            }
+                        ) { _, video ->
                             RelatedVideoItem(
                                 video = video,
                                 isFollowed = video.owner.mid in success.followingMids,
@@ -733,6 +769,9 @@ private fun ScrollableVideoInfoSection(
     videoTags: List<com.android.purebilibili.data.model.response.VideoTag>,
     ownerFollowerCount: Int?,
     ownerVideoCount: Int?,
+    bgmInfo: BgmInfo? = null,
+    bgmInfoList: List<BgmInfo> = emptyList(),
+    onBgmClick: (BgmInfo) -> Unit = {},
     onFollowClick: () -> Unit,
     onFavoriteClick: () -> Unit,
     onLikeClick: () -> Unit,
@@ -743,6 +782,7 @@ private fun ScrollableVideoInfoSection(
     onDownloadClick: () -> Unit,
     onWatchLaterClick: () -> Unit,
     onRelatedVideoClick: (String, android.os.Bundle?) -> Unit,
+    onOpenBilibiliLink: ((String) -> Unit)?,
     relatedVideos: List<com.android.purebilibili.data.model.response.RelatedVideo> = emptyList(),
     modifier: Modifier = Modifier
 ) {
@@ -782,7 +822,14 @@ private fun ScrollableVideoInfoSection(
         item {
             VideoTitleWithDesc(
                 info = info,
-                videoTags = videoTags
+                videoTags = videoTags,
+                bgmList = resolveDisplayBgmList(
+                    bgmInfo = bgmInfo,
+                    bgmInfoList = bgmInfoList
+                ),
+                onBgmClick = onBgmClick,
+                onRelatedVideoClick = onRelatedVideoClick,
+                onDescriptionUrlClick = onOpenBilibiliLink
             )
             Spacer(modifier = Modifier.height(12.dp))
         }

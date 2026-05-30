@@ -5,6 +5,7 @@ import android.widget.Toast
 import androidx.compose.ui.graphics.luminance
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
@@ -28,8 +29,11 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.drawWithContent
 import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.BlendMode
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.CompositingStrategy
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.Shadow
 import androidx.compose.ui.graphics.toArgb
@@ -42,6 +46,7 @@ import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.view.WindowCompat
@@ -49,6 +54,7 @@ import androidx.core.view.WindowInsetsControllerCompat
 import androidx.lifecycle.viewmodel.compose.viewModel
 import coil.compose.AsyncImage
 import coil.request.ImageRequest
+import kotlin.coroutines.EmptyCoroutineContext
 import com.android.purebilibili.core.theme.iOSBlue
 import com.android.purebilibili.core.theme.iOSGreen
 import com.android.purebilibili.core.theme.iOSOrange
@@ -71,15 +77,19 @@ import com.android.purebilibili.core.ui.rememberAppDownloadIcon
 import com.android.purebilibili.core.ui.rememberAppFolderIcon
 import com.android.purebilibili.core.ui.rememberAppHistoryIcon
 import com.android.purebilibili.core.ui.rememberAppInboxIcon
+import com.android.purebilibili.core.ui.rememberAppCommentIcon
 import com.android.purebilibili.core.ui.rememberAppLikeIcon
+import com.android.purebilibili.core.ui.rememberAppMoreIcon
 import com.android.purebilibili.core.ui.rememberAppLockIcon
 import com.android.purebilibili.core.ui.rememberAppPhotoIcon
 import com.android.purebilibili.core.ui.rememberAppProfileAddIcon
 import com.android.purebilibili.core.ui.rememberAppRefreshIcon
 import com.android.purebilibili.core.ui.rememberAppRestoreIcon
 import com.android.purebilibili.core.ui.rememberAppSettingsIcon
+import com.android.purebilibili.core.ui.rememberAppShareIcon
 import com.android.purebilibili.core.ui.components.UserLevelBadge
 import com.android.purebilibili.core.ui.rememberAppWarningIcon
+import com.android.purebilibili.core.ui.rememberAppWatchLaterIcon
 import com.android.purebilibili.core.ui.wallpaper.ProfileWallpaperLayout
 import com.android.purebilibili.core.ui.wallpaper.ProfileWallpaperTransform
 import com.android.purebilibili.core.ui.wallpaper.resolveProfileWallpaperLayout
@@ -92,6 +102,13 @@ import com.android.purebilibili.core.ui.components.IOSSwitchItem
 import com.android.purebilibili.core.ui.components.IOSSectionTitle
 import com.android.purebilibili.core.ui.components.IOSGridItem
 import com.android.purebilibili.core.store.StoredAccountSession
+import com.android.purebilibili.core.store.SettingsManager
+import com.android.purebilibili.data.model.response.FavFolder
+import com.android.purebilibili.data.model.response.FollowBangumiItem
+import com.android.purebilibili.data.model.response.SpaceAggregateArchiveItem
+import com.android.purebilibili.data.model.response.SpaceDynamicItem
+import com.android.purebilibili.data.model.response.SpaceVideoItem
+import com.android.purebilibili.feature.home.components.BottomBarLiquidSegmentedControl
 import androidx.compose.ui.input.nestedscroll.nestedScroll
 
 import com.android.purebilibili.core.ui.blur.rememberRecoverableHazeState
@@ -119,11 +136,48 @@ internal fun resolveProfileWallpaperActionColumnCount(screenWidthDp: Int): Int {
     return if (screenWidthDp < 360) 2 else 3
 }
 
+internal enum class ProfileWallpaperActionLabelMode {
+    SINGLE_LINE,
+    TWO_LINE
+}
+
+internal fun resolveProfileWallpaperActionLabelMode(
+    screenWidthDp: Int,
+    columnCount: Int
+): ProfileWallpaperActionLabelMode {
+    return if (columnCount == 3 && screenWidthDp in 360 until 430) {
+        ProfileWallpaperActionLabelMode.TWO_LINE
+    } else {
+        ProfileWallpaperActionLabelMode.SINGLE_LINE
+    }
+}
+
+internal fun resolveProfileWallpaperActionTitleLines(
+    title: String,
+    labelMode: ProfileWallpaperActionLabelMode
+): List<String> {
+    if (labelMode == ProfileWallpaperActionLabelMode.SINGLE_LINE || title.length <= 2) {
+        return listOf(title)
+    }
+    return listOf(title.take(2), title.drop(2))
+}
+
+internal fun resolveProfileWallpaperBlendBandDp(topBannerHeightDp: Float): Float {
+    return 196f
+}
+
 internal fun resolveProfileWallpaperActionBlurEnabled(
     headerBlurEnabled: Boolean,
     bottomBarBlurEnabled: Boolean
 ): Boolean {
     return headerBlurEnabled || bottomBarBlurEnabled
+}
+
+internal fun shouldRenderProfileImmersiveBackground(
+    hasTopPhoto: Boolean,
+    deferImmersiveRenderBudget: Boolean
+): Boolean {
+    return hasTopPhoto && !deferImmersiveRenderBudget
 }
 
 internal fun resolveProfileTopBarScrimAlpha(
@@ -132,8 +186,9 @@ internal fun resolveProfileTopBarScrimAlpha(
 ): Float {
     if (!isImmersive) return 0f
     // Immersive profile pages already have a wallpaper gradient behind the top bar.
-    // Adding another black scrim on scroll creates the visible dark band regression.
-    return 0f
+    // Keep this capped so controls stay readable without restoring the old dark band.
+    val progress = collapsedFraction.coerceIn(0f, 1f)
+    return 0.10f + (0.12f * progress)
 }
 
 internal fun resolveProfileLightStatusBars(
@@ -147,27 +202,37 @@ internal fun resolveProfileLightStatusBars(
 
 internal fun shouldPinProfileTopBarOnScroll(useSplitLayout: Boolean): Boolean = true
 
+internal fun shouldShowProfileHistoryService(bottomBarVisibleTabIds: Collection<String>): Boolean {
+    return bottomBarVisibleTabIds.none { it.equals("HISTORY", ignoreCase = true) }
+}
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun ProfileScreen(
     viewModel: ProfileViewModel = viewModel(),
+    isCurrentPage: Boolean = true,
     onBack: () -> Unit,
     onGoToLogin: () -> Unit,
     onLogoutSuccess: () -> Unit,
     onAccountSwitchSuccess: () -> Unit = {},
     onSettingsClick: () -> Unit,
     onHistoryClick: () -> Unit,
+    showHistoryService: Boolean = true,
     onFavoriteClick: () -> Unit,
+    onFavoriteFolderClick: (Long, Long, String) -> Unit = { _, _, _ -> },
     onFollowingClick: (Long) -> Unit = {},  //  关注列表点击
     onDownloadClick: () -> Unit = {},  //  离线缓存点击
     onWatchLaterClick: () -> Unit = {}, // 稍后再看点击
     onInboxClick: () -> Unit = {},  //  [新增] 私信入口点击
-    onVideoClick: (String) -> Unit = {}  // [新增] 视频点击（三连彩蛋跳转用）
+    onVideoClick: (String) -> Unit = {},  // [新增] 视频点击（三连彩蛋跳转用）
+    onBangumiClick: (Long, Long) -> Unit = { _, _ -> },
+    onBangumiMoreClick: () -> Unit = {},
+    deferImmersiveRenderBudget: Boolean = false
     // [注意] 移除了 globalHazeState - 双 hazeSource 模式与 Haze 库冲突
 ) {
-    val state by viewModel.uiState.collectAsState()
-    val accounts by viewModel.accounts.collectAsState()
-    val activeAccountMid by viewModel.activeAccountMid.collectAsState()
+    val state by viewModel.uiState.collectAsState(context = kotlin.coroutines.EmptyCoroutineContext)
+    val accounts by viewModel.accounts.collectAsState(context = kotlin.coroutines.EmptyCoroutineContext)
+    val activeAccountMid by viewModel.activeAccountMid.collectAsState(context = kotlin.coroutines.EmptyCoroutineContext)
     val context = LocalContext.current
     val view = LocalView.current
     var showAccountSwitchDialog by remember { mutableStateOf(false) }
@@ -220,8 +285,13 @@ fun ProfileScreen(
         }
     }
 
+    LaunchedEffect(viewModel, isCurrentPage) {
+        if (isCurrentPage) {
+            viewModel.loadProfile()
+        }
+    }
+
     LaunchedEffect(Unit) {
-        viewModel.loadProfile()
         viewModel.refreshSavedAccounts()
         //  [埋点] 页面浏览追踪
         com.android.purebilibili.core.util.AnalyticsHelper.logScreenView("ProfileScreen")
@@ -297,13 +367,18 @@ fun ProfileScreen(
             
             
             Box(modifier = Modifier.fillMaxSize()) {
-                ProfileBackground(user = guestUser, viewModel = viewModel)
+                ProfileBackground(
+                    user = guestUser,
+                    viewModel = viewModel,
+                    deferImmersiveRenderBudget = deferImmersiveRenderBudget
+                )
                 
                 MobileProfileContent(
                     user = guestUser,
                     onLogout = onGoToLogin, // "退出登录" 变为 "登录"
                     onAccountManageClick = { showAccountSwitchDialog = true },
                     onHistoryClick = onGoToLogin, // 游客点击功能需登录
+                    showHistoryService = showHistoryService,
                     onFavoriteClick = onGoToLogin,
                     onFollowingClick = { onGoToLogin() },
                     onDownloadClick = onGoToLogin,
@@ -401,6 +476,18 @@ fun ProfileScreen(
             } else {
                 TopAppBarDefaults.exitUntilCollapsedScrollBehavior()
             }
+            val favoriteFolderShortcuts = remember(currentUiState.favoriteFolders, currentUiState.user.mid) {
+                resolveProfileFavoriteFolderShortcuts(
+                    folders = currentUiState.favoriteFolders,
+                    ownerMid = currentUiState.user.mid
+                )
+            }
+            LaunchedEffect(currentUiState.space.signSaveMessage) {
+                currentUiState.space.signSaveMessage?.let { message ->
+                    Toast.makeText(context, message, Toast.LENGTH_SHORT).show()
+                    viewModel.clearProfileSpaceMessage()
+                }
+            }
             
             AdaptiveScaffold(
                 modifier = Modifier.nestedScroll(scrollBehavior.nestedScrollConnection),
@@ -439,47 +526,43 @@ fun ProfileScreen(
             ) { padding ->
                 Box(modifier = Modifier.fillMaxSize()) {
                     // [Refactor] Lift background to root
-                    ProfileBackground(user = currentUiState.user, viewModel = viewModel)
+                    ProfileBackground(
+                        user = currentUiState.user,
+                        viewModel = viewModel,
+                        deferImmersiveRenderBudget = deferImmersiveRenderBudget
+                    )
                     
-                    if (windowSizeClass.shouldUseSplitLayout) {
-                        TabletProfileContent(
-                            user = currentUiState.user,
-                            onLogout = {
-                                viewModel.logout()
-                                onLogoutSuccess()
-                            },
-                            onAccountManageClick = { showAccountSwitchDialog = true },
-                            onHistoryClick = onHistoryClick,
-                            onFavoriteClick = onFavoriteClick,
-                            onFollowingClick = { onFollowingClick(currentUiState.user.mid) },
-                            onDownloadClick = onDownloadClick,
-                            onWatchLaterClick = onWatchLaterClick,
-                            paddingValues = padding
-                        )
-                    } else {
-                        MobileProfileContent(
-                            viewModel = viewModel,
-                            user = currentUiState.user,
-                            onLogout = {
-                                viewModel.logout()
-                                onLogoutSuccess()
-                            },
-                            onAccountManageClick = { showAccountSwitchDialog = true },
-                            onHistoryClick = onHistoryClick,
-                            onFavoriteClick = onFavoriteClick,
-                            onFollowingClick = { onFollowingClick(currentUiState.user.mid) },
-                            onDownloadClick = onDownloadClick,
-                            onWatchLaterClick = onWatchLaterClick,
-                            onInboxClick = onInboxClick,  //  [新增] 私信入口
-                            onVideoClick = onVideoClick,  // [新增] 三连彩蛋跳转
-                            // [Immersive] Pass ScrollBehavior and Navigation Actions
-                            scrollBehavior = scrollBehavior,
-                            onBack = onBack,
-                            onSettingsClick = onSettingsClick,
-                            hazeState = hazeState,
-                            paddingValues = padding
-                        )
-                    }
+                    ProfileSpaceContent(
+                        viewModel = viewModel,
+                        user = currentUiState.user,
+                        space = currentUiState.space,
+                        editableAccount = currentUiState.editableAccount,
+                        favoriteFolderShortcuts = favoriteFolderShortcuts,
+                        onTabSelected = viewModel::selectProfileSpaceTab,
+                        onSignSave = viewModel::updateProfileSign,
+                        onLogout = {
+                            viewModel.logout()
+                            onLogoutSuccess()
+                        },
+                        onAccountManageClick = { showAccountSwitchDialog = true },
+                        onHistoryClick = onHistoryClick,
+                        showHistoryService = showHistoryService,
+                        onFavoriteClick = onFavoriteClick,
+                        onFavoriteFolderClick = onFavoriteFolderClick,
+                        onFollowingClick = { onFollowingClick(currentUiState.user.mid) },
+                        onDownloadClick = onDownloadClick,
+                        onWatchLaterClick = onWatchLaterClick,
+                        onInboxClick = onInboxClick,
+                        onVideoClick = onVideoClick,
+                        onBangumiClick = onBangumiClick,
+                        onBangumiMoreClick = onBangumiMoreClick,
+                        scrollBehavior = scrollBehavior,
+                        onBack = onBack,
+                        onSettingsClick = onSettingsClick,
+                        hazeState = hazeState,
+                        paddingValues = padding,
+                        isTablet = windowSizeClass.shouldUseSplitLayout
+                    )
                 }
             }
         }
@@ -498,20 +581,29 @@ internal fun resolveProfileTopBannerHeightDp(widthSizeClass: WindowWidthSizeClas
 @Composable
 private fun BoxScope.ProfileBackground(
     user: UserState,
-    viewModel: ProfileViewModel
+    viewModel: ProfileViewModel,
+    deferImmersiveRenderBudget: Boolean
 ) {
     val windowSizeClass = LocalWindowSizeClass.current
     val isTablet = windowSizeClass.shouldUseSplitLayout
     val isImmersive = user.topPhoto.isNotEmpty()
-    val bgTransform by viewModel.getProfileBgTransform(isTablet).collectAsState(ProfileWallpaperTransform())
+    val bgTransform by viewModel.getProfileBgTransform(isTablet).collectAsState(
+        initial = ProfileWallpaperTransform(),
+        context = EmptyCoroutineContext
+    )
     val profileWallpaperLayout = remember(windowSizeClass.widthSizeClass) {
         resolveProfileWallpaperLayout(windowSizeClass.widthSizeClass)
     }
 
-    if (isImmersive) {
+    if (shouldRenderProfileImmersiveBackground(isImmersive, deferImmersiveRenderBudget)) {
         when (profileWallpaperLayout) {
             ProfileWallpaperLayout.TOP_BANNER_BLUR_BG -> {
-                val bannerHeight = resolveProfileTopBannerHeightDp(windowSizeClass.widthSizeClass).dp
+                val bannerHeightDp = resolveProfileTopBannerHeightDp(windowSizeClass.widthSizeClass)
+                val bannerHeight = bannerHeightDp.dp
+                val blendBandHeight = resolveProfileWallpaperBlendBandDp(
+                    topBannerHeightDp = bannerHeightDp
+                ).dp
+                val clearImageHeight = bannerHeight + 144.dp
                 // 1. 底层：高斯模糊填充 (填补图片不够长的区域)
                 AsyncImage(
                     model = ImageRequest.Builder(LocalContext.current)
@@ -568,35 +660,54 @@ private fun BoxScope.ProfileBackground(
                     ),
                     modifier = Modifier
                         .fillMaxWidth()
-                        .height(bannerHeight)
+                        .height(clearImageHeight)
                         .graphicsLayer(
                             scaleX = bgTransform.scale,
-                            scaleY = bgTransform.scale
+                            scaleY = bgTransform.scale,
+                            compositingStrategy = CompositingStrategy.Offscreen
                         )
+                        .drawWithContent {
+                            drawContent()
+                            val fadeStart = (size.height - blendBandHeight.toPx()).coerceAtLeast(0f)
+                            drawRect(
+                                brush = Brush.verticalGradient(
+                                    colors = listOf(
+                                        Color.White,
+                                        Color.White,
+                                        Color.Transparent
+                                    ),
+                                    startY = fadeStart,
+                                    endY = size.height
+                                ),
+                                blendMode = BlendMode.DstIn
+                            )
+                        }
                         .align(Alignment.TopCenter)
                 )
 
                 Box(
                     modifier = Modifier
                         .align(Alignment.TopCenter)
-                        .padding(top = bannerHeight - 92.dp)
+                        .padding(top = bannerHeight - blendBandHeight * 0.62f)
                         .fillMaxWidth()
-                        .height(220.dp)
+                        .height(blendBandHeight + 124.dp)
                         .background(
                             Brush.verticalGradient(
                                 colors = if (MaterialTheme.colorScheme.surface.luminance() < 0.5f) {
                                     listOf(
                                         Color.Transparent,
-                                        Color.Black.copy(alpha = 0.06f),
-                                        Color.Black.copy(alpha = 0.20f),
-                                        MaterialTheme.colorScheme.surface.copy(alpha = 0.36f)
+                                        Color.Black.copy(alpha = 0.04f),
+                                        Color.Black.copy(alpha = 0.12f),
+                                        MaterialTheme.colorScheme.surface.copy(alpha = 0.30f),
+                                        MaterialTheme.colorScheme.surface.copy(alpha = 0.52f)
                                     )
                                 } else {
                                     listOf(
                                         Color.Transparent,
-                                        Color.White.copy(alpha = 0.04f),
-                                        Color.Black.copy(alpha = 0.08f),
-                                        MaterialTheme.colorScheme.surface.copy(alpha = 0.24f)
+                                        Color.White.copy(alpha = 0.03f),
+                                        Color.Black.copy(alpha = 0.05f),
+                                        MaterialTheme.colorScheme.surface.copy(alpha = 0.20f),
+                                        MaterialTheme.colorScheme.surface.copy(alpha = 0.38f)
                                     )
                                 }
                             )
@@ -702,6 +813,1251 @@ private fun BoxScope.ProfileBackground(
     }
 }
 
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun ProfileSpaceContent(
+    viewModel: ProfileViewModel,
+    user: UserState,
+    space: ProfileSpaceUiState,
+    editableAccount: ProfileEditableAccountState,
+    favoriteFolderShortcuts: List<ProfileFavoriteFolderShortcut>,
+    onTabSelected: (ProfileSpaceMainTab) -> Unit,
+    onSignSave: (String) -> Unit,
+    onLogout: () -> Unit,
+    onAccountManageClick: () -> Unit,
+    onHistoryClick: () -> Unit,
+    showHistoryService: Boolean,
+    onFavoriteClick: () -> Unit,
+    onFavoriteFolderClick: (Long, Long, String) -> Unit,
+    onFollowingClick: () -> Unit,
+    onDownloadClick: () -> Unit,
+    onWatchLaterClick: () -> Unit,
+    onInboxClick: () -> Unit,
+    onVideoClick: (String) -> Unit,
+    onBangumiClick: (Long, Long) -> Unit,
+    onBangumiMoreClick: () -> Unit,
+    scrollBehavior: TopAppBarScrollBehavior,
+    onBack: () -> Unit,
+    onSettingsClick: () -> Unit,
+    hazeState: HazeState?,
+    paddingValues: PaddingValues,
+    isTablet: Boolean
+) {
+    var showEditDialog by remember { mutableStateOf(false) }
+    var showAdjustmentSheet by remember { mutableStateOf(false) }
+    var tempSelectedUri by remember { mutableStateOf<Uri?>(null) }
+    val customBackgroundUri by viewModel.getProfileBgUri().collectAsState(
+        initial = null,
+        context = EmptyCoroutineContext
+    )
+    val photoPickerLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.PickVisualMedia()
+    ) { uri: Uri? ->
+        if (uri != null) {
+            tempSelectedUri = uri
+            showAdjustmentSheet = true
+        }
+    }
+    var showWallpaperSheet by remember { mutableStateOf(false) }
+    var showPhotoPickerDialog by remember { mutableStateOf(false) }
+
+    if (showEditDialog) {
+        ProfileEditAccountDialog(
+            state = editableAccount,
+            isSaving = space.isSavingSign,
+            onDismiss = { showEditDialog = false },
+            onSaveSign = onSignSave
+        )
+    }
+    if (showAdjustmentSheet && tempSelectedUri != null) {
+        ProfileWallpaperAdjustmentSheet(
+            imageUri = tempSelectedUri.toString(),
+            initialMobileTransform = ProfileWallpaperTransform(),
+            initialTabletTransform = ProfileWallpaperTransform(),
+            onDismiss = { showAdjustmentSheet = false },
+            onSave = { mobileTransform, tabletTransform ->
+                showAdjustmentSheet = false
+                tempSelectedUri?.let { uri ->
+                    viewModel.updateCustomBackground(uri, mobileTransform, tabletTransform)
+                }
+            }
+        )
+    }
+    if (showWallpaperSheet) {
+        OfficialWallpaperSheet(viewModel = viewModel, onDismiss = { showWallpaperSheet = false })
+    }
+    if (showPhotoPickerDialog) {
+        AlertDialog(
+            onDismissRequest = { showPhotoPickerDialog = false },
+            title = { Text("选择照片", fontWeight = FontWeight.Bold) },
+            text = { Text("将打开系统相册选择一张照片作为背景。\n\n仅获取选中照片的访问权限，不会访问其他照片。") },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        showPhotoPickerDialog = false
+                        photoPickerLauncher.launch(
+                            PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)
+                        )
+                    }
+                ) {
+                    Text("选择照片")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showPhotoPickerDialog = false }) {
+                    Text("取消")
+                }
+            }
+        )
+    }
+
+    val isImmersive = user.topPhoto.isNotEmpty()
+    val statusBarTopPadding = WindowInsets.statusBars.asPaddingValues().calculateTopPadding()
+    val collapsedFraction = scrollBehavior.state.collapsedFraction.coerceIn(0f, 1f)
+    val topBarScrimColor = if (isImmersive) {
+        Color.Black.copy(alpha = resolveProfileTopBarScrimAlpha(true, collapsedFraction))
+    } else {
+        MaterialTheme.colorScheme.surface.copy(alpha = collapsedFraction)
+    }
+
+    Box(modifier = Modifier.fillMaxSize()) {
+        if (isTablet) {
+            Row(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .then(if (hazeState != null) Modifier.hazeSource(hazeState) else Modifier)
+                    .padding(paddingValues)
+                    .padding(horizontal = 24.dp, vertical = 16.dp),
+                horizontalArrangement = Arrangement.spacedBy(20.dp)
+            ) {
+                Column(
+                    modifier = Modifier
+                        .widthIn(min = 300.dp, max = 360.dp)
+                        .verticalScroll(rememberScrollState()),
+                    verticalArrangement = Arrangement.spacedBy(16.dp)
+                ) {
+                    ProfileSpaceHeader(
+                        user = user,
+                        editableAccount = editableAccount,
+                        compact = true,
+                        onEditClick = { showEditDialog = true },
+                        onFollowingClick = onFollowingClick
+                    )
+                    ProfileWallpaperActionCard(
+                        isImmersive = false,
+                        hazeState = hazeState,
+                        onOfficialWallpaperClick = { showWallpaperSheet = true },
+                        onLocalAlbumClick = { showPhotoPickerDialog = true },
+                        onResetWallpaperClick = { viewModel.clearCustomBackground() },
+                        isResetEnabled = !customBackgroundUri.isNullOrEmpty()
+                    )
+                    ProfileSpaceServices(
+                        favoriteFolderShortcuts = favoriteFolderShortcuts,
+                        onHistoryClick = onHistoryClick,
+                        showHistoryService = showHistoryService,
+                        onFavoriteClick = onFavoriteClick,
+                        onFavoriteFolderClick = onFavoriteFolderClick,
+                        onDownloadClick = onDownloadClick,
+                        onWatchLaterClick = onWatchLaterClick,
+                        onInboxClick = onInboxClick,
+                        onAccountManageClick = onAccountManageClick,
+                        onLogout = onLogout
+                    )
+                }
+                ProfileSpaceFeedColumn(
+                    user = user,
+                    space = space,
+                    showServicesInHome = false,
+                    favoriteFolderShortcuts = favoriteFolderShortcuts,
+                    onTabSelected = onTabSelected,
+                    onFavoriteClick = onFavoriteClick,
+                    onFavoriteFolderClick = onFavoriteFolderClick,
+                    onBangumiClick = onBangumiClick,
+                    onBangumiMoreClick = onBangumiMoreClick,
+                    onVideoClick = onVideoClick,
+                    onHistoryClick = onHistoryClick,
+                    showHistoryService = showHistoryService,
+                    onDownloadClick = onDownloadClick,
+                    onWatchLaterClick = onWatchLaterClick,
+                    onInboxClick = onInboxClick,
+                    onAccountManageClick = onAccountManageClick,
+                    onLogout = onLogout,
+                    modifier = Modifier.weight(1f),
+                    contentPadding = PaddingValues(bottom = 48.dp)
+                )
+            }
+        } else {
+            LazyColumn(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .then(if (hazeState != null) Modifier.hazeSource(hazeState) else Modifier),
+                contentPadding = PaddingValues(bottom = paddingValues.calculateBottomPadding() + 120.dp)
+            ) {
+                item {
+                    ProfileSpaceCoverHeader(
+                        user = user,
+                        editableAccount = editableAccount,
+                        onEditClick = { showEditDialog = true },
+                        onFollowingClick = onFollowingClick
+                    )
+                }
+                item {
+                    ProfileWallpaperActionCard(
+                        isImmersive = isImmersive,
+                        hazeState = hazeState,
+                        onOfficialWallpaperClick = { showWallpaperSheet = true },
+                        onLocalAlbumClick = { showPhotoPickerDialog = true },
+                        onResetWallpaperClick = { viewModel.clearCustomBackground() },
+                        isResetEnabled = !customBackgroundUri.isNullOrEmpty()
+                    )
+                }
+                item {
+                    ProfileSpaceTabs(
+                        selectedTab = space.selectedTab,
+                        onTabSelected = onTabSelected
+                    )
+                }
+                item {
+                    ProfileSpaceTabBody(
+                        user = user,
+                        space = space,
+                        showServicesInHome = true,
+                        favoriteFolderShortcuts = favoriteFolderShortcuts,
+                        onFavoriteClick = onFavoriteClick,
+                        onFavoriteFolderClick = onFavoriteFolderClick,
+                        onBangumiClick = onBangumiClick,
+                        onBangumiMoreClick = onBangumiMoreClick,
+                        onVideoClick = onVideoClick,
+                        onHistoryClick = onHistoryClick,
+                        showHistoryService = showHistoryService,
+                        onDownloadClick = onDownloadClick,
+                        onWatchLaterClick = onWatchLaterClick,
+                        onInboxClick = onInboxClick,
+                        onAccountManageClick = onAccountManageClick,
+                        onLogout = onLogout
+                    )
+                }
+            }
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(statusBarTopPadding + 64.dp)
+                    .background(topBarScrimColor)
+                    .align(Alignment.TopCenter)
+            )
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(top = statusBarTopPadding)
+                    .height(56.dp)
+                    .padding(horizontal = 8.dp)
+                    .align(Alignment.TopCenter),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                IconButton(onClick = onBack) {
+                    Icon(rememberAppBackIcon(), contentDescription = "返回", tint = Color.White)
+                }
+                Spacer(modifier = Modifier.weight(1f))
+                IconButton(onClick = onSettingsClick) {
+                    Icon(rememberAppSettingsIcon(), contentDescription = "设置", tint = Color.White)
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun ProfileSpaceFeedColumn(
+    user: UserState,
+    space: ProfileSpaceUiState,
+    showServicesInHome: Boolean,
+    favoriteFolderShortcuts: List<ProfileFavoriteFolderShortcut>,
+    onTabSelected: (ProfileSpaceMainTab) -> Unit,
+    onFavoriteClick: () -> Unit,
+    onFavoriteFolderClick: (Long, Long, String) -> Unit,
+    onBangumiClick: (Long, Long) -> Unit,
+    onBangumiMoreClick: () -> Unit,
+    onVideoClick: (String) -> Unit,
+    onHistoryClick: () -> Unit,
+    showHistoryService: Boolean,
+    onDownloadClick: () -> Unit,
+    onWatchLaterClick: () -> Unit,
+    onInboxClick: () -> Unit,
+    onAccountManageClick: () -> Unit,
+    onLogout: () -> Unit,
+    modifier: Modifier,
+    contentPadding: PaddingValues
+) {
+    LazyColumn(modifier = modifier.fillMaxHeight(), contentPadding = contentPadding) {
+        item {
+            ProfileSpaceTabs(selectedTab = space.selectedTab, onTabSelected = onTabSelected)
+        }
+        item {
+            ProfileSpaceTabBody(
+                user = user,
+                space = space,
+                showServicesInHome = showServicesInHome,
+                favoriteFolderShortcuts = favoriteFolderShortcuts,
+                onFavoriteClick = onFavoriteClick,
+                onFavoriteFolderClick = onFavoriteFolderClick,
+                onBangumiClick = onBangumiClick,
+                onBangumiMoreClick = onBangumiMoreClick,
+                onVideoClick = onVideoClick,
+                onHistoryClick = onHistoryClick,
+                showHistoryService = showHistoryService,
+                onDownloadClick = onDownloadClick,
+                onWatchLaterClick = onWatchLaterClick,
+                onInboxClick = onInboxClick,
+                onAccountManageClick = onAccountManageClick,
+                onLogout = onLogout
+            )
+        }
+    }
+}
+
+@Composable
+private fun ProfileSpaceCoverHeader(
+    user: UserState,
+    editableAccount: ProfileEditableAccountState,
+    onEditClick: () -> Unit,
+    onFollowingClick: () -> Unit
+) {
+    Box(modifier = Modifier.fillMaxWidth()) {
+        AsyncImage(
+            model = user.topPhoto.ifBlank { user.face },
+            contentDescription = null,
+            contentScale = ContentScale.Crop,
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(320.dp)
+        )
+        Box(
+            modifier = Modifier
+                .matchParentSize()
+                .background(
+                    Brush.verticalGradient(
+                        colors = listOf(Color.Transparent, Color.Black.copy(alpha = 0.82f)),
+                        startY = 90f
+                    )
+                )
+        )
+        ProfileSpaceHeader(
+            user = user,
+            editableAccount = editableAccount,
+            compact = false,
+            onEditClick = onEditClick,
+            onFollowingClick = onFollowingClick,
+            modifier = Modifier
+                .align(Alignment.BottomStart)
+                .padding(top = 126.dp, bottom = 18.dp)
+        )
+    }
+}
+
+@Composable
+private fun ProfileSpaceHeader(
+    user: UserState,
+    editableAccount: ProfileEditableAccountState,
+    compact: Boolean,
+    onEditClick: () -> Unit,
+    onFollowingClick: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    val textColor = if (compact) MaterialTheme.colorScheme.onSurface else Color.White
+    val secondaryColor = textColor.copy(alpha = 0.72f)
+    Column(
+        modifier = modifier
+            .fillMaxWidth()
+            .padding(horizontal = 20.dp),
+        verticalArrangement = Arrangement.spacedBy(12.dp)
+    ) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            AsyncImage(
+                model = user.face,
+                contentDescription = null,
+                contentScale = ContentScale.Crop,
+                modifier = Modifier
+                    .size(if (compact) 72.dp else 88.dp)
+                    .clip(CircleShape)
+                    .border(2.dp, Color.White.copy(alpha = 0.88f), CircleShape)
+            )
+            Spacer(modifier = Modifier.weight(1f))
+            ProfileSpaceStat("粉丝", user.follower, textColor)
+            ProfileSpaceStat("关注", user.following, textColor, onClick = onFollowingClick)
+            ProfileSpaceStat("获赞", user.dynamic, textColor)
+        }
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text(
+                text = user.name,
+                style = MaterialTheme.typography.titleLarge,
+                color = textColor,
+                fontWeight = FontWeight.Bold,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.weight(1f, fill = false)
+            )
+            Spacer(modifier = Modifier.width(8.dp))
+            UserLevelBadge(level = user.level)
+            if (user.isVip) {
+                Spacer(modifier = Modifier.width(8.dp))
+                Text(
+                    text = user.vipLabel.ifBlank { "大会员" },
+                    style = MaterialTheme.typography.labelSmall,
+                    color = Color.White,
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(999.dp))
+                        .background(com.android.purebilibili.core.theme.iOSPink)
+                        .padding(horizontal = 8.dp, vertical = 3.dp)
+                )
+            }
+        }
+        OutlinedButton(
+            onClick = onEditClick,
+            modifier = Modifier.fillMaxWidth(),
+            colors = ButtonDefaults.outlinedButtonColors(contentColor = textColor),
+            border = BorderStroke(1.dp, textColor.copy(alpha = 0.42f)),
+            shape = RoundedCornerShape(8.dp)
+        ) {
+            Text("编辑资料")
+        }
+        Text(
+            text = editableAccount.sign.ifBlank { "这个人很神秘，什么都没有写" },
+            style = MaterialTheme.typography.bodyMedium,
+            color = secondaryColor,
+            maxLines = 2,
+            overflow = TextOverflow.Ellipsis
+        )
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            Text(
+                text = "IP 属地 · 未展示",
+                style = MaterialTheme.typography.labelMedium,
+                color = secondaryColor
+            )
+            if (editableAccount.sex.isNotBlank()) {
+                Text(
+                    text = editableAccount.sex,
+                    style = MaterialTheme.typography.labelMedium,
+                    color = secondaryColor
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun ProfileSpaceStat(label: String, value: Int, color: Color, onClick: (() -> Unit)? = null) {
+    Column(
+        modifier = Modifier
+            .width(72.dp)
+            .then(if (onClick != null) Modifier.clickable(onClick = onClick) else Modifier),
+        horizontalAlignment = Alignment.CenterHorizontally
+    ) {
+        Text(
+            text = FormatUtils.formatStat(value.toLong()),
+            style = MaterialTheme.typography.titleMedium,
+            color = color,
+            fontWeight = FontWeight.Bold
+        )
+        Text(text = label, style = MaterialTheme.typography.labelSmall, color = color.copy(alpha = 0.7f))
+    }
+}
+
+@Composable
+private fun ProfileSpaceTabs(selectedTab: ProfileSpaceMainTab, onTabSelected: (ProfileSpaceMainTab) -> Unit) {
+    val tabs = remember { defaultProfileSpaceTabs() }
+    val context = LocalContext.current
+    val bottomBarLiquidGlassEnabled by SettingsManager
+        .getBottomBarLiquidGlassEnabled(context)
+        .collectAsState(initial = true, context = EmptyCoroutineContext)
+    val selectedIndex = tabs.indexOfFirst { it.tab == selectedTab }.coerceAtLeast(0)
+    if (bottomBarLiquidGlassEnabled) {
+        BottomBarLiquidSegmentedControl(
+            items = tabs.map { it.title },
+            selectedIndex = selectedIndex,
+            onSelected = { index -> tabs.getOrNull(index)?.let { onTabSelected(it.tab) } },
+            modifier = Modifier
+                .fillMaxWidth()
+                .background(MaterialTheme.colorScheme.surface.copy(alpha = 0.92f))
+                .padding(horizontal = 18.dp, vertical = 8.dp),
+            height = 46.dp,
+            indicatorHeight = 40.dp,
+            labelFontSize = 16.sp,
+            forceLiquidChrome = true
+        )
+        return
+    }
+
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .background(MaterialTheme.colorScheme.surface.copy(alpha = 0.92f))
+            .horizontalScroll(rememberScrollState())
+            .padding(horizontal = 18.dp),
+        horizontalArrangement = Arrangement.spacedBy(28.dp)
+    ) {
+        tabs.forEach { item ->
+            val selected = item.tab == selectedTab
+            Column(
+                modifier = Modifier
+                    .height(50.dp)
+                    .clickable { onTabSelected(item.tab) },
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.Center
+            ) {
+                Text(
+                    text = item.title,
+                    style = MaterialTheme.typography.titleSmall,
+                    color = if (selected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
+                    fontWeight = if (selected) FontWeight.Bold else FontWeight.Medium
+                )
+                Spacer(modifier = Modifier.height(6.dp))
+                Box(
+                    modifier = Modifier
+                        .width(28.dp)
+                        .height(3.dp)
+                        .clip(RoundedCornerShape(999.dp))
+                        .background(if (selected) MaterialTheme.colorScheme.primary else Color.Transparent)
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun ProfileSpaceTabBody(
+    user: UserState,
+    space: ProfileSpaceUiState,
+    showServicesInHome: Boolean,
+    favoriteFolderShortcuts: List<ProfileFavoriteFolderShortcut>,
+    onFavoriteClick: () -> Unit,
+    onFavoriteFolderClick: (Long, Long, String) -> Unit,
+    onBangumiClick: (Long, Long) -> Unit,
+    onBangumiMoreClick: () -> Unit,
+    onVideoClick: (String) -> Unit,
+    onHistoryClick: () -> Unit,
+    showHistoryService: Boolean,
+    onDownloadClick: () -> Unit,
+    onWatchLaterClick: () -> Unit,
+    onInboxClick: () -> Unit,
+    onAccountManageClick: () -> Unit,
+    onLogout: () -> Unit
+) {
+    when (space.selectedTab) {
+        ProfileSpaceMainTab.HOME -> ProfileSpaceHome(
+            user = user,
+            space = space,
+            showServices = showServicesInHome,
+            favoriteFolderShortcuts = favoriteFolderShortcuts,
+            onFavoriteClick = onFavoriteClick,
+            onFavoriteFolderClick = onFavoriteFolderClick,
+            onBangumiClick = onBangumiClick,
+            onBangumiMoreClick = onBangumiMoreClick,
+            onVideoClick = onVideoClick,
+            onHistoryClick = onHistoryClick,
+            showHistoryService = showHistoryService,
+            onDownloadClick = onDownloadClick,
+            onWatchLaterClick = onWatchLaterClick,
+            onInboxClick = onInboxClick,
+            onAccountManageClick = onAccountManageClick,
+            onLogout = onLogout
+        )
+        ProfileSpaceMainTab.DYNAMIC -> ProfileDynamicList(space.dynamicItems, onVideoClick)
+        ProfileSpaceMainTab.CONTRIBUTION -> ProfileVideoList(space.contributionVideos, onVideoClick)
+        ProfileSpaceMainTab.FAVORITE -> ProfileFavoriteFolderList(user.mid, space.favoriteFolders, onFavoriteFolderClick)
+        ProfileSpaceMainTab.BANGUMI -> ProfileBangumiList(space.bangumiItems, onBangumiClick)
+    }
+}
+
+@Composable
+private fun ProfileSpaceHome(
+    user: UserState,
+    space: ProfileSpaceUiState,
+    showServices: Boolean,
+    favoriteFolderShortcuts: List<ProfileFavoriteFolderShortcut>,
+    onFavoriteClick: () -> Unit,
+    onFavoriteFolderClick: (Long, Long, String) -> Unit,
+    onBangumiClick: (Long, Long) -> Unit,
+    onBangumiMoreClick: () -> Unit,
+    onVideoClick: (String) -> Unit,
+    onHistoryClick: () -> Unit,
+    showHistoryService: Boolean,
+    onDownloadClick: () -> Unit,
+    onWatchLaterClick: () -> Unit,
+    onInboxClick: () -> Unit,
+    onAccountManageClick: () -> Unit,
+    onLogout: () -> Unit
+) {
+    Column(
+        modifier = Modifier.padding(top = 10.dp, bottom = 24.dp),
+        verticalArrangement = Arrangement.spacedBy(18.dp)
+    ) {
+        resolveProfileSpaceHomeSections(
+            favoriteFolders = space.favoriteFolders,
+            bangumiItems = space.bangumiItems,
+            coinVideos = space.coinVideos,
+            likeVideos = space.likeVideos,
+            contributionVideos = space.contributionVideos
+        ).forEach { section ->
+            when (section) {
+                ProfileSpaceHomeSection.FAVORITES -> ProfileFavoriteFolderStrip(
+                    ownerMid = user.mid,
+                    folders = space.favoriteFolders,
+                    count = space.favoriteFolderCount,
+                    onMoreClick = onFavoriteClick,
+                    onFolderClick = onFavoriteFolderClick
+                )
+                ProfileSpaceHomeSection.BANGUMI -> ProfileBangumiStrip(
+                    items = space.bangumiItems,
+                    count = space.bangumiCount,
+                    onMoreClick = onBangumiMoreClick,
+                    onBangumiClick = onBangumiClick
+                )
+                ProfileSpaceHomeSection.COIN_VIDEOS -> ProfileAggregateVideoStrip("最近投币的视频", space.coinVideoCount, space.coinVideos, onVideoClick)
+                ProfileSpaceHomeSection.LIKE_VIDEOS -> ProfileAggregateVideoStrip("最近点赞的视频", space.likeVideoCount, space.likeVideos, onVideoClick)
+                ProfileSpaceHomeSection.CONTRIBUTIONS -> ProfileVideoStrip("投稿预览", space.contributionVideoCount, space.contributionVideos, onVideoClick)
+                ProfileSpaceHomeSection.SERVICES -> if (showServices) {
+                    ProfileSpaceServices(
+                        favoriteFolderShortcuts = favoriteFolderShortcuts,
+                        onHistoryClick = onHistoryClick,
+                        showHistoryService = showHistoryService,
+                        onFavoriteClick = onFavoriteClick,
+                        onFavoriteFolderClick = onFavoriteFolderClick,
+                        onDownloadClick = onDownloadClick,
+                        onWatchLaterClick = onWatchLaterClick,
+                        onInboxClick = onInboxClick,
+                        onAccountManageClick = onAccountManageClick,
+                        onLogout = onLogout
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun ProfileSpaceServices(
+    favoriteFolderShortcuts: List<ProfileFavoriteFolderShortcut>,
+    onHistoryClick: () -> Unit,
+    showHistoryService: Boolean,
+    onFavoriteClick: () -> Unit,
+    onFavoriteFolderClick: (Long, Long, String) -> Unit,
+    onDownloadClick: () -> Unit,
+    onWatchLaterClick: () -> Unit,
+    onInboxClick: () -> Unit,
+    onAccountManageClick: () -> Unit,
+    onLogout: () -> Unit
+) {
+    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        Text(
+            text = "我的服务",
+            style = MaterialTheme.typography.titleMedium,
+            color = MaterialTheme.colorScheme.onSurface,
+            fontWeight = FontWeight.Bold,
+            modifier = Modifier.padding(horizontal = 20.dp)
+        )
+        ServicesSection(
+            onHistoryClick = onHistoryClick,
+            showHistoryService = showHistoryService,
+            onFavoriteClick = onFavoriteClick,
+            favoriteFolderShortcuts = favoriteFolderShortcuts,
+            onFavoriteFolderClick = onFavoriteFolderClick,
+            showFavoriteService = false,
+            onDownloadClick = onDownloadClick,
+            onWatchLaterClick = onWatchLaterClick,
+            onInboxClick = onInboxClick,
+            onAccountManageClick = onAccountManageClick,
+            onLogout = onLogout,
+            containerColor = MaterialTheme.colorScheme.surface,
+            contentColor = MaterialTheme.colorScheme.onSurface,
+            isLogin = true
+        )
+    }
+}
+
+@Composable
+private fun ProfileFavoriteFolderStrip(
+    ownerMid: Long,
+    folders: List<FavFolder>,
+    count: Int,
+    onMoreClick: () -> Unit,
+    onFolderClick: (Long, Long, String) -> Unit
+) {
+    ProfileSpaceSection(title = "收藏", count = count, onMoreClick = onMoreClick) {
+        folders.take(6).forEach { folder ->
+            ProfileSpacePosterCard(
+                title = folder.title,
+                subtitle = "${folder.media_count} 个内容",
+                imageUrl = folder.cover,
+                width = 168.dp,
+                height = 152.dp,
+                onClick = { onFolderClick(folder.id, ownerMid, folder.title) }
+            )
+        }
+    }
+}
+
+@Composable
+private fun ProfileBangumiStrip(
+    items: List<FollowBangumiItem>,
+    count: Int,
+    onMoreClick: () -> Unit,
+    onBangumiClick: (Long, Long) -> Unit
+) {
+    ProfileSpaceSection(title = "追番", count = count, onMoreClick = onMoreClick) {
+        items.take(8).forEach { item ->
+            ProfileSpacePosterCard(
+                title = item.title,
+                subtitle = item.progress.ifBlank { item.newEp?.indexShow.orEmpty() },
+                imageUrl = item.cover,
+                width = 126.dp,
+                height = 198.dp,
+                onClick = { onBangumiClick(item.seasonId, item.firstEp) }
+            )
+        }
+    }
+}
+
+@Composable
+private fun ProfileAggregateVideoStrip(
+    title: String,
+    count: Int,
+    videos: List<SpaceAggregateArchiveItem>,
+    onVideoClick: (String) -> Unit
+) {
+    ProfileSpaceSection(title = title, count = count, onMoreClick = {}) {
+        videos.take(8).forEach { video ->
+            ProfileSpacePosterCard(
+                title = video.title,
+                subtitle = video.length,
+                imageUrl = video.cover,
+                width = 192.dp,
+                height = 148.dp,
+                onClick = { video.bvid.takeIf { it.isNotBlank() }?.let(onVideoClick) }
+            )
+        }
+    }
+}
+
+@Composable
+private fun ProfileVideoStrip(title: String, count: Int, videos: List<SpaceVideoItem>, onVideoClick: (String) -> Unit) {
+    ProfileSpaceSection(title = title, count = count, onMoreClick = {}) {
+        videos.take(8).forEach { video ->
+            ProfileSpacePosterCard(
+                title = video.title,
+                subtitle = video.length,
+                imageUrl = video.pic,
+                width = 192.dp,
+                height = 148.dp,
+                onClick = { video.bvid.takeIf { it.isNotBlank() }?.let(onVideoClick) }
+            )
+        }
+    }
+}
+
+@Composable
+private fun ProfileSpaceSection(title: String, count: Int, onMoreClick: () -> Unit, content: @Composable RowScope.() -> Unit) {
+    Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 20.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text(
+                text = if (count > 0) "$title  ${FormatUtils.formatStat(count.toLong())}" else title,
+                style = MaterialTheme.typography.titleMedium,
+                color = MaterialTheme.colorScheme.onSurface,
+                fontWeight = FontWeight.Bold,
+                modifier = Modifier.weight(1f)
+            )
+            TextButton(onClick = onMoreClick) {
+                Text("查看更多")
+            }
+        }
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .horizontalScroll(rememberScrollState())
+                .padding(horizontal = 16.dp),
+            horizontalArrangement = Arrangement.spacedBy(12.dp),
+            content = content
+        )
+    }
+}
+
+@Composable
+private fun ProfileSpacePosterCard(
+    title: String,
+    subtitle: String,
+    imageUrl: String,
+    width: androidx.compose.ui.unit.Dp,
+    height: androidx.compose.ui.unit.Dp,
+    onClick: () -> Unit
+) {
+    Surface(
+        modifier = Modifier
+            .width(width)
+            .height(height)
+            .clip(RoundedCornerShape(8.dp))
+            .clickable(onClick = onClick),
+        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.45f),
+        shadowElevation = 0.dp
+    ) {
+        Column {
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .weight(1f)
+                    .background(MaterialTheme.colorScheme.surfaceVariant)
+            ) {
+                if (imageUrl.isNotBlank()) {
+                    AsyncImage(
+                        model = imageUrl,
+                        contentDescription = null,
+                        contentScale = ContentScale.Crop,
+                        modifier = Modifier.matchParentSize()
+                    )
+                } else {
+                    Icon(
+                        rememberAppFolderIcon(),
+                        contentDescription = null,
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.42f),
+                        modifier = Modifier
+                            .size(42.dp)
+                            .align(Alignment.Center)
+                    )
+                }
+            }
+            Column(modifier = Modifier.padding(horizontal = 10.dp, vertical = 8.dp)) {
+                Text(
+                    text = title,
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurface,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
+                Text(
+                    text = subtitle.ifBlank { "公开" },
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun ProfileFavoriteFolderList(ownerMid: Long, folders: List<FavFolder>, onFolderClick: (Long, Long, String) -> Unit) {
+    if (folders.isEmpty()) {
+        ProfileSpaceEmpty("暂无公开收藏夹")
+        return
+    }
+    Column(modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+        folders.forEach { folder ->
+            ProfileSpaceListRow(
+                title = folder.title,
+                subtitle = "${folder.media_count} 个内容",
+                imageUrl = folder.cover,
+                onClick = { onFolderClick(folder.id, ownerMid, folder.title) }
+            )
+        }
+    }
+}
+
+@Composable
+private fun ProfileBangumiList(items: List<FollowBangumiItem>, onBangumiClick: (Long, Long) -> Unit) {
+    if (items.isEmpty()) {
+        ProfileSpaceEmpty("暂无追番")
+        return
+    }
+    Column(modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+        items.forEach { item ->
+            ProfileSpaceListRow(
+                title = item.title,
+                subtitle = item.progress.ifBlank { item.newEp?.indexShow.orEmpty() },
+                imageUrl = item.cover,
+                onClick = { onBangumiClick(item.seasonId, item.firstEp) }
+            )
+        }
+    }
+}
+
+@Composable
+private fun ProfileVideoList(videos: List<SpaceVideoItem>, onVideoClick: (String) -> Unit) {
+    if (videos.isEmpty()) {
+        ProfileSpaceEmpty("暂无投稿")
+        return
+    }
+    Column(modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+        videos.forEach { video ->
+            ProfileSpaceListRow(
+                title = video.title,
+                subtitle = "${FormatUtils.formatStat(video.play.toLong())} 播放 · ${video.length}",
+                imageUrl = video.pic,
+                onClick = { video.bvid.takeIf { it.isNotBlank() }?.let(onVideoClick) }
+            )
+        }
+    }
+}
+
+@Composable
+private fun ProfileDynamicList(items: List<SpaceDynamicItem>, onVideoClick: (String) -> Unit) {
+    if (items.isEmpty()) {
+        ProfileSpaceEmpty("暂无动态")
+        return
+    }
+    Column(modifier = Modifier.padding(vertical = 4.dp)) {
+        items.forEachIndexed { index, item ->
+            ProfileDynamicCard(item = item, onVideoClick = onVideoClick)
+            if (index != items.lastIndex) {
+                HorizontalDivider(
+                    modifier = Modifier.padding(vertical = 4.dp),
+                    color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.22f),
+                    thickness = 0.7.dp
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun ProfileDynamicCard(item: SpaceDynamicItem, onVideoClick: (String) -> Unit) {
+    val author = item.modules.module_author
+    val authorName = resolveProfileDynamicAuthorName(item)
+    val publishText = resolveProfileDynamicPublishText(item)
+    val bodyText = resolveProfileDynamicText(item)
+    val orig = item.orig
+    val moreIcon = rememberAppMoreIcon()
+
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 16.dp, vertical = 12.dp),
+        verticalArrangement = Arrangement.spacedBy(10.dp)
+    ) {
+        Row(verticalAlignment = Alignment.Top) {
+            AsyncImage(
+                model = author?.face.orEmpty(),
+                contentDescription = null,
+                contentScale = ContentScale.Crop,
+                modifier = Modifier
+                    .size(42.dp)
+                    .clip(CircleShape)
+                    .background(MaterialTheme.colorScheme.surfaceVariant)
+            )
+            Spacer(modifier = Modifier.width(10.dp))
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    text = authorName,
+                    style = MaterialTheme.typography.titleSmall,
+                    color = MaterialTheme.colorScheme.primary,
+                    fontWeight = FontWeight.SemiBold,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
+                if (publishText.isNotBlank()) {
+                    Text(
+                        text = publishText,
+                        style = MaterialTheme.typography.labelMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+            }
+            Icon(
+                imageVector = moreIcon,
+                contentDescription = null,
+                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.size(22.dp)
+            )
+        }
+
+        if (bodyText.isNotBlank()) {
+            Text(
+                text = bodyText,
+                style = MaterialTheme.typography.bodyLarge,
+                color = MaterialTheme.colorScheme.onSurface,
+                lineHeight = 22.sp,
+                maxLines = 8,
+                overflow = TextOverflow.Ellipsis
+            )
+        }
+
+        if (orig != null) {
+            ProfileDynamicOriginalContent(item = orig, onVideoClick = onVideoClick)
+        } else {
+            ProfileDynamicMajorContent(item = item, onVideoClick = onVideoClick)
+        }
+
+        ProfileDynamicActionRow(item = item)
+    }
+}
+
+@Composable
+private fun ProfileDynamicOriginalContent(item: SpaceDynamicItem, onVideoClick: (String) -> Unit) {
+    val authorName = resolveProfileDynamicAuthorName(item)
+    val text = resolveProfileDynamicText(item)
+
+    Surface(
+        modifier = Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(8.dp),
+        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.28f),
+        shadowElevation = 0.dp
+    ) {
+        Column(
+            modifier = Modifier.padding(12.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            if (authorName.isNotBlank()) {
+                Text(
+                    text = "@$authorName",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.primary,
+                    fontWeight = FontWeight.SemiBold,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
+            }
+            if (text.isNotBlank()) {
+                Text(
+                    text = text,
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    lineHeight = 21.sp,
+                    maxLines = 8,
+                    overflow = TextOverflow.Ellipsis
+                )
+            }
+            ProfileDynamicMajorContent(item = item, onVideoClick = onVideoClick)
+        }
+    }
+}
+
+@Composable
+private fun ProfileDynamicMajorContent(item: SpaceDynamicItem, onVideoClick: (String) -> Unit) {
+    val dynamic = item.modules.module_dynamic
+    val major = dynamic?.major
+    val cover = resolveProfileDynamicCover(item)
+    val title = major?.archive?.title
+        ?.takeIf { it.isNotBlank() }
+        ?: major?.opus?.title?.takeIf { it.isNotBlank() }
+        ?: major?.article?.title?.takeIf { it.isNotBlank() }
+    val clickableBvid = major?.archive?.bvid?.takeIf { it.isNotBlank() }
+
+    if (cover.isBlank() && title.isNullOrBlank()) return
+
+    Column(
+        modifier = Modifier.then(
+            if (clickableBvid != null) Modifier.clickable { onVideoClick(clickableBvid) } else Modifier
+        ),
+        verticalArrangement = Arrangement.spacedBy(8.dp)
+    ) {
+        if (!title.isNullOrBlank() && title != resolveProfileDynamicText(item)) {
+            Text(
+                text = title,
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurface,
+                fontWeight = FontWeight.Medium,
+                maxLines = 2,
+                overflow = TextOverflow.Ellipsis
+            )
+        }
+        if (cover.isNotBlank()) {
+            AsyncImage(
+                model = ImageRequest.Builder(LocalContext.current)
+                    .data(cover)
+                    .crossfade(true)
+                    .build(),
+                contentDescription = null,
+                contentScale = ContentScale.Crop,
+                modifier = Modifier
+                    .fillMaxWidth(0.72f)
+                    .aspectRatio(1f)
+                    .clip(RoundedCornerShape(6.dp))
+                    .background(MaterialTheme.colorScheme.surfaceVariant)
+            )
+        }
+    }
+}
+
+@Composable
+private fun ProfileDynamicActionRow(item: SpaceDynamicItem) {
+    val stat = item.modules.module_stat
+    val shareIcon = rememberAppShareIcon()
+    val commentIcon = rememberAppCommentIcon()
+    val likeIcon = rememberAppLikeIcon()
+
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(top = 2.dp),
+        horizontalArrangement = Arrangement.SpaceEvenly,
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        ProfileDynamicAction(
+            icon = shareIcon,
+            text = resolveProfileDynamicActionText("转发", stat?.forward?.count ?: 0)
+        )
+        ProfileDynamicAction(
+            icon = commentIcon,
+            text = resolveProfileDynamicActionText("评论", stat?.comment?.count ?: 0)
+        )
+        ProfileDynamicAction(
+            icon = likeIcon,
+            text = resolveProfileDynamicActionText("点赞", stat?.like?.count ?: 0)
+        )
+    }
+}
+
+@Composable
+private fun ProfileDynamicAction(icon: ImageVector, text: String) {
+    Row(
+        modifier = Modifier
+            .heightIn(min = 40.dp)
+            .padding(horizontal = 10.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.Center
+    ) {
+        Icon(
+            imageVector = icon,
+            contentDescription = null,
+            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.size(18.dp)
+        )
+        Spacer(modifier = Modifier.width(5.dp))
+        Text(
+            text = text,
+            style = MaterialTheme.typography.labelMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            maxLines = 1
+        )
+    }
+}
+
+@Composable
+private fun ProfileSpaceListRow(title: String, subtitle: String, imageUrl: String, onClick: () -> Unit) {
+    Surface(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(8.dp))
+            .clickable(onClick = onClick),
+        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.42f),
+        shadowElevation = 0.dp
+    ) {
+        Row(
+            modifier = Modifier.padding(10.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(12.dp)
+        ) {
+            Box(
+                modifier = Modifier
+                    .size(width = 112.dp, height = 64.dp)
+                    .clip(RoundedCornerShape(6.dp))
+                    .background(MaterialTheme.colorScheme.surfaceVariant),
+                contentAlignment = Alignment.Center
+            ) {
+                if (imageUrl.isNotBlank()) {
+                    AsyncImage(
+                        model = imageUrl,
+                        contentDescription = null,
+                        contentScale = ContentScale.Crop,
+                        modifier = Modifier.matchParentSize()
+                    )
+                } else {
+                    Icon(
+                        rememberAppFolderIcon(),
+                        contentDescription = null,
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.42f)
+                    )
+                }
+            }
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    text = title,
+                    style = MaterialTheme.typography.bodyLarge,
+                    color = MaterialTheme.colorScheme.onSurface,
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis
+                )
+                Spacer(modifier = Modifier.height(4.dp))
+                Text(
+                    text = subtitle.ifBlank { "公开" },
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun ProfileSpaceEmpty(text: String) {
+    Box(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(48.dp),
+        contentAlignment = Alignment.Center
+    ) {
+        Text(text = text, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+    }
+}
+
+@Composable
+private fun ProfileEditAccountDialog(
+    state: ProfileEditableAccountState,
+    isSaving: Boolean,
+    onDismiss: () -> Unit,
+    onSaveSign: (String) -> Unit
+) {
+    var sign by remember(state.sign) { mutableStateOf(state.sign) }
+    val signError = validateProfileSign(sign)
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("编辑资料") },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                ProfileReadonlyAccountField("昵称", state.name)
+                ProfileReadonlyAccountField("生日", state.birthday.ifBlank { "未展示" })
+                ProfileReadonlyAccountField("性别", state.sex.ifBlank { "未展示" })
+                OutlinedTextField(
+                    value = sign,
+                    onValueChange = { sign = it },
+                    label = { Text("签名") },
+                    minLines = 3,
+                    maxLines = 4,
+                    isError = signError != null,
+                    supportingText = { Text(signError ?: "${sign.length}/70") },
+                    modifier = Modifier.fillMaxWidth()
+                )
+            }
+        },
+        confirmButton = {
+            Button(
+                onClick = { onSaveSign(sign) },
+                enabled = !isSaving && signError == null
+            ) {
+                Text(if (isSaving) "保存中" else "保存签名")
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) {
+                Text("取消")
+            }
+        }
+    )
+}
+
+@Composable
+private fun ProfileReadonlyAccountField(label: String, value: String) {
+    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+        Text(text = label, style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        Text(text = value, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurface)
+    }
+}
+
 
 @Composable
 fun TabletProfileContent(
@@ -709,10 +2065,14 @@ fun TabletProfileContent(
     onLogout: () -> Unit,
     onAccountManageClick: () -> Unit = {},
     onHistoryClick: () -> Unit,
+    showHistoryService: Boolean = true,
     onFavoriteClick: () -> Unit,
+    favoriteFolderShortcuts: List<ProfileFavoriteFolderShortcut> = emptyList(),
+    onFavoriteFolderClick: (Long, Long, String) -> Unit = { _, _, _ -> },
     onFollowingClick: () -> Unit,
     onDownloadClick: () -> Unit,
     onWatchLaterClick: () -> Unit,
+    onInboxClick: () -> Unit = {},
     paddingValues: PaddingValues
 ) {
     AdaptiveSplitLayout(
@@ -752,6 +2112,7 @@ fun TabletProfileContent(
                     .background(glassContainerColor)
                     .border(1.dp, glassBorderColor, RoundedCornerShape(32.dp))
                     .padding(24.dp)
+                    .verticalScroll(rememberScrollState())
             ) {
                 Column(
                     modifier = Modifier.fillMaxWidth(),
@@ -768,14 +2129,18 @@ fun TabletProfileContent(
                     // [Modified] Use new grid layout
                     ServicesSection(
                         onHistoryClick = onHistoryClick, 
+                        showHistoryService = showHistoryService,
                         onFavoriteClick = onFavoriteClick, 
+                        favoriteFolderShortcuts = favoriteFolderShortcuts,
+                        onFavoriteFolderClick = onFavoriteFolderClick,
                         onDownloadClick = onDownloadClick, 
                         onWatchLaterClick = onWatchLaterClick,
+                        onInboxClick = onInboxClick,
                         onAccountManageClick = onAccountManageClick,
                         isTablet = true, // Force tablet mode
                         containerColor = Color.Transparent, // Grid items handle bg
                         contentColor = contentColor,
-                        modifier = Modifier.weight(1f)
+                        modifier = Modifier.fillMaxWidth()
                     )
 
                     Spacer(modifier = Modifier.height(24.dp))
@@ -817,7 +2182,10 @@ fun MobileProfileContent(
     onLogout: () -> Unit,
     onAccountManageClick: () -> Unit = {},
     onHistoryClick: () -> Unit,
+    showHistoryService: Boolean = true,
     onFavoriteClick: () -> Unit,
+    favoriteFolderShortcuts: List<ProfileFavoriteFolderShortcut> = emptyList(),
+    onFavoriteFolderClick: (Long, Long, String) -> Unit = { _, _, _ -> },
     onFollowingClick: () -> Unit,
     onDownloadClick: () -> Unit,
     onWatchLaterClick: () -> Unit,
@@ -837,7 +2205,10 @@ fun MobileProfileContent(
     // [New] Adjustment Sheet State
     var showAdjustmentSheet by remember { mutableStateOf(false) }
     var tempSelectedUri by remember { mutableStateOf<Uri?>(null) }
-    val customBackgroundUri by viewModel.getProfileBgUri().collectAsState(null)
+    val customBackgroundUri by viewModel.getProfileBgUri().collectAsState(
+        initial = null,
+        context = EmptyCoroutineContext
+    )
 
     val photoPickerLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.PickVisualMedia()
@@ -1017,7 +2388,7 @@ fun MobileProfileContent(
                 val isDarkTheme = MaterialTheme.colorScheme.surface.luminance() < 0.5f
                 
                 // 玻璃颜色：深色模式用黑透，浅色模式用白透
-                val glassContainerColor = if (isDarkTheme) Color.Black.copy(alpha = 0.3f) else Color.White.copy(alpha = 0.5f)
+                val glassContainerColor = if (isDarkTheme) Color.Black.copy(alpha = 0.24f) else Color.White.copy(alpha = 0.28f)
                 
                 // 文字颜色：深色背景用白字，浅色背景用黑字
                 val glassContentColor = if (isDarkTheme) Color.White else Color.Black
@@ -1027,7 +2398,10 @@ fun MobileProfileContent(
 
                 ServicesSection(
                     onHistoryClick = onHistoryClick, 
+                    showHistoryService = showHistoryService,
                     onFavoriteClick = onFavoriteClick, 
+                    favoriteFolderShortcuts = favoriteFolderShortcuts,
+                    onFavoriteFolderClick = onFavoriteFolderClick,
                     onDownloadClick = onDownloadClick, 
                     onWatchLaterClick = onWatchLaterClick,
                     onInboxClick = onInboxClick,  //  [新增]
@@ -1245,12 +2619,24 @@ private fun ProfileWallpaperActionCard(
     val columnCount = remember(configuration.screenWidthDp) {
         resolveProfileWallpaperActionColumnCount(configuration.screenWidthDp)
     }
+    val labelMode = remember(configuration.screenWidthDp, columnCount) {
+        resolveProfileWallpaperActionLabelMode(
+            screenWidthDp = configuration.screenWidthDp,
+            columnCount = columnCount
+        )
+    }
     val headerBlurEnabled by com.android.purebilibili.core.store.SettingsManager
         .getHeaderBlurEnabled(context)
-        .collectAsState(initial = true)
+        .collectAsState(
+            initial = true,
+            context = kotlin.coroutines.EmptyCoroutineContext
+        )
     val bottomBarBlurEnabled by com.android.purebilibili.core.store.SettingsManager
         .getBottomBarBlurEnabled(context)
-        .collectAsState(initial = true)
+        .collectAsState(
+            initial = true,
+            context = kotlin.coroutines.EmptyCoroutineContext
+        )
     val blurEnabled = remember(headerBlurEnabled, bottomBarBlurEnabled) {
         resolveProfileWallpaperActionBlurEnabled(
             headerBlurEnabled = headerBlurEnabled,
@@ -1325,6 +2711,10 @@ private fun ProfileWallpaperActionCard(
                         ProfileWallpaperActionButton(
                             modifier = Modifier.weight(1f),
                             title = action.title,
+                            titleLines = resolveProfileWallpaperActionTitleLines(
+                                title = action.title,
+                                labelMode = labelMode
+                            ),
                             subtitle = "",
                             icon = action.icon,
                             containerColor = buttonColor,
@@ -1349,6 +2739,7 @@ private fun ProfileWallpaperActionCard(
 @Composable
 private fun ProfileWallpaperActionButton(
     title: String,
+    titleLines: List<String>,
     subtitle: String,
     icon: ImageVector,
     containerColor: Color,
@@ -1364,6 +2755,8 @@ private fun ProfileWallpaperActionButton(
     val shape = RoundedCornerShape(20.dp)
     val effectiveContentColor = if (enabled) contentColor else contentColor.copy(alpha = 0.38f)
     val effectiveSecondaryColor = if (enabled) secondaryColor else secondaryColor.copy(alpha = 0.5f)
+    val displayTitle = titleLines.joinToString("\n")
+    val titleMaxLines = titleLines.size.coerceAtLeast(1)
     Surface(
         modifier = modifier
             .fillMaxWidth()
@@ -1388,7 +2781,7 @@ private fun ProfileWallpaperActionButton(
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .heightIn(min = 46.dp)
+                .heightIn(min = if (titleMaxLines > 1) 58.dp else 46.dp)
                 .padding(horizontal = 12.dp, vertical = 10.dp),
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(8.dp)
@@ -1414,10 +2807,12 @@ private fun ProfileWallpaperActionButton(
                 modifier = Modifier.weight(1f)
             ) {
                 Text(
-                    text = title,
+                    text = displayTitle,
                     style = MaterialTheme.typography.labelMedium,
                     fontWeight = FontWeight.SemiBold,
-                    color = effectiveContentColor
+                    color = effectiveContentColor,
+                    maxLines = titleMaxLines,
+                    overflow = TextOverflow.Ellipsis
                 )
                 if (subtitle.isNotEmpty()) {
                     Spacer(modifier = Modifier.height(2.dp))
@@ -1587,7 +2982,11 @@ fun VipBannerSection(user: UserState) {
 @Composable
 fun ServicesSection(
     onHistoryClick: () -> Unit,
+    showHistoryService: Boolean = true,
     onFavoriteClick: () -> Unit,
+    favoriteFolderShortcuts: List<ProfileFavoriteFolderShortcut> = emptyList(),
+    onFavoriteFolderClick: (Long, Long, String) -> Unit = { _, _, _ -> },
+    showFavoriteService: Boolean = true,
     onDownloadClick: () -> Unit = {},
     onWatchLaterClick: () -> Unit = {},
     onInboxClick: () -> Unit = {},  //  [新增] 私信入口
@@ -1603,131 +3002,476 @@ fun ServicesSection(
     val downloadIcon = rememberAppDownloadIcon()
     val historyIcon = rememberAppHistoryIcon()
     val bookmarkIcon = rememberAppBookmarkIcon()
+    val watchLaterIcon = rememberAppWatchLaterIcon()
     val inboxIcon = rememberAppInboxIcon()
     val accountIcon = rememberAppProfileAddIcon()
+
     if (isTablet) {
-        // [New] Grid Layout for Tablet
-        val items = listOf(
-            Triple("离线缓存", downloadIcon, onDownloadClick),
-            Triple("历史记录", historyIcon, onHistoryClick),
-            Triple("我的收藏", bookmarkIcon, onFavoriteClick),
-            Triple("稍后再看", bookmarkIcon, onWatchLaterClick),
-            Triple("消息中心", inboxIcon, onInboxClick),
-            Triple("账号切换", accountIcon, onAccountManageClick)
-        )
-        
-        // Simple Grid implementation since LazyVerticalGrid might be overkill inside a Column if not scrolling?
-        // But tablet right pane has plenty space.
-        // Let's use FlowRow for auto-wrapping or a simple Row/Column combo.
-        // Actually, since it's a fixed list, a hardcoded Row/Column grid is safer than LazyGrid inside Scrollable.
-        
-        // 2 columns x N rows
-        Column(
-            modifier = modifier
-                .heightIn(max = (items.size / 2) * 160.dp)
-        ) {
-            items.chunked(2).forEach { rowItems ->
-                Row(
-                    modifier = Modifier.fillMaxWidth().weight(1f),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(16.dp)
-                ) {
-                    rowItems.forEach { (title, icon, onClick) ->
-                        IOSGridItem(
-                            icon = icon,
-                            title = title,
-                            onClick = onClick,
-                            iconTint = contentColor, // Use content color for icon in this mode?
-                            containerColor = MaterialTheme.colorScheme.surface.copy(alpha = 0.3f), // Slightly distinct background
-                            contentColor = contentColor,
-                            modifier = Modifier.weight(1f)
-                        )
-                    }
-                    // Fill empty space if odd number
-                    if (rowItems.size < 2) {
-                        Spacer(modifier = Modifier.weight(1f))
+        val items = buildList {
+            add(Triple("离线缓存", downloadIcon, onDownloadClick))
+            if (showHistoryService) add(Triple("历史记录", historyIcon, onHistoryClick))
+            if (showFavoriteService) add(Triple("我的收藏", bookmarkIcon, onFavoriteClick))
+            add(Triple("稍后再看", watchLaterIcon, onWatchLaterClick))
+            add(Triple("消息中心", inboxIcon, onInboxClick))
+            add(Triple("账号切换", accountIcon, onAccountManageClick))
+        }
+
+        Column(modifier = modifier) {
+            Column(
+                modifier = Modifier
+                    .heightIn(max = ((items.size + 1) / 2) * 160.dp)
+            ) {
+                items.chunked(2).forEach { rowItems ->
+                    Row(
+                        modifier = Modifier.fillMaxWidth().weight(1f),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(16.dp)
+                    ) {
+                        rowItems.forEach { (title, icon, onClick) ->
+                            IOSGridItem(
+                                icon = icon,
+                                title = title,
+                                onClick = onClick,
+                                iconTint = contentColor,
+                                containerColor = MaterialTheme.colorScheme.surface.copy(alpha = 0.3f),
+                                contentColor = contentColor,
+                                modifier = Modifier.weight(1f)
+                            )
+                        }
+                        if (rowItems.size < 2) {
+                            Spacer(modifier = Modifier.weight(1f))
+                        }
                     }
                 }
+            }
+            if (showFavoriteService && favoriteFolderShortcuts.isNotEmpty()) {
+                Spacer(modifier = Modifier.height(18.dp))
+                ProfileFavoriteFolderShortcutGrid(
+                    shortcuts = favoriteFolderShortcuts,
+                    onFavoriteFolderClick = onFavoriteFolderClick,
+                    contentColor = contentColor
+                )
             }
         }
 
     } else {
-        // [Original] List Layout for Mobile
-    // [Modified] 移除标题，纯净悬浮岛风格 (Option 3)
-    // IOSSectionTitle("我的服务")
-    
-    // [Modified] Custom Surface implementation to avoid tonalElevation overlay causing "outer background" issue
-    Surface(
-        modifier = modifier
-            .padding(horizontal = 16.dp)
-            .then(
-                if (borderColor != null) {
-                    Modifier.border(
-                        width = 0.5.dp, 
-                        color = borderColor, 
-                        shape = RoundedCornerShape(24.dp)
+        val useImmersiveServiceLayout = borderColor != null
+        if (useImmersiveServiceLayout) {
+            Column(
+                modifier = modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 16.dp),
+                verticalArrangement = Arrangement.spacedBy(12.dp)
+            ) {
+                ProfileServicesListIsland(
+                    containerColor = containerColor,
+                    borderColor = borderColor
+                ) {
+                    ProfileServiceRow(
+                        icon = downloadIcon,
+                        title = "离线缓存",
+                        onClick = onDownloadClick,
+                        iconTint = MaterialTheme.colorScheme.primary,
+                        textColor = contentColor,
                     )
-                } else Modifier
-            )
-            .clip(RoundedCornerShape(24.dp)),
+                    ProfileServiceDivider(contentColor)
+                    if (showHistoryService) {
+                        ProfileServiceRow(
+                            icon = historyIcon,
+                            title = "历史记录",
+                            onClick = onHistoryClick,
+                            iconTint = iOSBlue,
+                            textColor = contentColor,
+                        )
+                        ProfileServiceDivider(contentColor)
+                    }
+                    if (showFavoriteService) {
+                        ProfileServiceRow(
+                            icon = bookmarkIcon,
+                            title = "我的收藏",
+                            onClick = onFavoriteClick,
+                            iconTint = iOSYellow,
+                            textColor = contentColor,
+                        )
+                        if (favoriteFolderShortcuts.isNotEmpty()) {
+                            ProfileFavoriteFolderShortcutGrid(
+                                shortcuts = favoriteFolderShortcuts,
+                                onFavoriteFolderClick = onFavoriteFolderClick,
+                                contentColor = contentColor,
+                                compactHorizontal = true,
+                                onMoreClick = onFavoriteClick,
+                                modifier = Modifier.padding(start = 58.dp, end = 14.dp, bottom = 10.dp)
+                            )
+                        }
+                        ProfileServiceDivider(contentColor)
+                    }
+                    ProfileServiceRow(
+                        icon = watchLaterIcon,
+                        title = "稍后再看",
+                        onClick = onWatchLaterClick,
+                        iconTint = iOSGreen,
+                        textColor = contentColor,
+                    )
+                    ProfileServiceDivider(contentColor)
+                    ProfileServiceRow(
+                        icon = inboxIcon,
+                        title = "消息中心",
+                        onClick = onInboxClick,
+                        iconTint = com.android.purebilibili.core.theme.iOSPink,
+                        textColor = contentColor,
+                    )
+                }
+                ProfileAccountActionArea(
+                    accountIcon = accountIcon,
+                    onAccountManageClick = onAccountManageClick,
+                    onLogout = onLogout,
+                    isLogin = isLogin,
+                    textColor = contentColor,
+                    containerColor = containerColor,
+                    borderColor = borderColor
+                )
+            }
+        } else {
+            Surface(
+                modifier = modifier
+                    .padding(horizontal = 16.dp)
+                    .clip(RoundedCornerShape(24.dp)),
+                color = containerColor,
+                shadowElevation = 0.dp,
+                tonalElevation = 0.dp // Ensure no extra overlay
+            ) {
+                Column {
+                    IOSClickableItem(
+                        icon = downloadIcon,
+                        title = "离线缓存",
+                        onClick = onDownloadClick,
+                        iconTint = MaterialTheme.colorScheme.primary,
+                        textColor = contentColor
+                    )
+                    if (showHistoryService) {
+                        IOSClickableItem(
+                            icon = historyIcon,
+                            title = "历史记录",
+                            onClick = onHistoryClick,
+                            iconTint = iOSBlue,
+                            textColor = contentColor
+                        )
+                    }
+                    if (showFavoriteService) {
+                        IOSClickableItem(
+                            icon = bookmarkIcon,
+                            title = "我的收藏",
+                            onClick = onFavoriteClick,
+                            iconTint = iOSYellow,
+                            textColor = contentColor
+                        )
+                        if (favoriteFolderShortcuts.isNotEmpty()) {
+                            ProfileFavoriteFolderShortcutGrid(
+                                shortcuts = favoriteFolderShortcuts,
+                                onFavoriteFolderClick = onFavoriteFolderClick,
+                                contentColor = contentColor,
+                                modifier = Modifier.padding(start = 56.dp, end = 16.dp, bottom = 12.dp)
+                            )
+                        }
+                    }
+                    IOSClickableItem(
+                        icon = watchLaterIcon,
+                        title = "稍后再看",
+                        onClick = onWatchLaterClick,
+                        iconTint = iOSGreen,
+                        textColor = contentColor
+                    )
+                    IOSClickableItem(
+                        icon = inboxIcon,
+                        title = "消息中心",
+                        onClick = onInboxClick,
+                        iconTint = com.android.purebilibili.core.theme.iOSPink,
+                        textColor = contentColor
+                    )
+                    IOSClickableItem(
+                        icon = accountIcon,
+                        title = "账号切换",
+                        onClick = onAccountManageClick,
+                        iconTint = iOSOrange,
+                        textColor = contentColor
+                    )
+                    IOSClickableItem(
+                        title = if (isLogin) "退出登录" else "立即登录",
+                        onClick = onLogout,
+                        textColor = if (isLogin) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.primary,
+                        centered = true,
+                        showChevron = false
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun ProfileServicesListIsland(
+    containerColor: Color,
+    borderColor: Color?,
+    content: @Composable ColumnScope.() -> Unit
+) {
+    Surface(
+        modifier = Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(24.dp),
         color = containerColor,
+        border = borderColor?.let { BorderStroke(0.5.dp, it) },
         shadowElevation = 0.dp,
-        tonalElevation = 0.dp // Ensure no extra overlay
+        tonalElevation = 0.dp
     ) {
-        Column {
-            IOSClickableItem(
-                icon = downloadIcon,
-                title = "离线缓存",
-                onClick = onDownloadClick,
-                iconTint = MaterialTheme.colorScheme.primary,
-                textColor = contentColor
+        Column(content = content)
+    }
+}
+
+@Composable
+private fun ProfileServiceRow(
+    title: String,
+    onClick: () -> Unit,
+    icon: ImageVector,
+    iconTint: Color,
+    textColor: Color
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .heightIn(min = 58.dp)
+            .clickable(onClick = onClick)
+            .padding(horizontal = 16.dp, vertical = 10.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Box(
+            modifier = Modifier
+                .size(38.dp)
+                .clip(RoundedCornerShape(12.dp))
+                .background(iconTint.copy(alpha = 0.14f)),
+            contentAlignment = Alignment.Center
+        ) {
+            Icon(
+                imageVector = icon,
+                contentDescription = null,
+                tint = iconTint,
+                modifier = Modifier.size(21.dp)
             )
-            IOSClickableItem(
-                icon = historyIcon,
-                title = "历史记录",
-                onClick = onHistoryClick,
-                iconTint = iOSBlue,
-                textColor = contentColor
-            )
-            IOSClickableItem(
-                icon = bookmarkIcon,
-                title = "我的收藏",
-                onClick = onFavoriteClick,
-                iconTint = iOSYellow,
-                textColor = contentColor
-            )
-            IOSClickableItem(
-                icon = bookmarkIcon,
-                title = "稍后再看",
-                onClick = onWatchLaterClick,
-                iconTint = iOSGreen,
-                textColor = contentColor
-            )
-            IOSClickableItem(
-                icon = inboxIcon,
-                title = "消息中心",
-                onClick = onInboxClick,
-                iconTint = com.android.purebilibili.core.theme.iOSPink,  //  粉色图标
-                textColor = contentColor
-            )
-            IOSClickableItem(
+        }
+        Spacer(modifier = Modifier.width(14.dp))
+        Text(
+            text = title,
+            style = MaterialTheme.typography.titleMedium,
+            fontWeight = FontWeight.SemiBold,
+            color = textColor,
+            modifier = Modifier.weight(1f),
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis
+        )
+        Icon(
+            imageVector = CupertinoIcons.Default.ChevronForward,
+            contentDescription = null,
+            tint = textColor.copy(alpha = 0.46f),
+            modifier = Modifier.size(20.dp)
+        )
+    }
+}
+
+@Composable
+private fun ProfileServiceDivider(contentColor: Color) {
+    Box(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(start = 68.dp, end = 16.dp)
+            .height(0.5.dp)
+            .background(contentColor.copy(alpha = 0.12f))
+    )
+}
+
+@Composable
+private fun ProfileAccountActionArea(
+    accountIcon: ImageVector,
+    onAccountManageClick: () -> Unit,
+    onLogout: () -> Unit,
+    isLogin: Boolean,
+    textColor: Color,
+    containerColor: Color,
+    borderColor: Color?
+) {
+    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        ProfileServicesListIsland(
+            containerColor = containerColor,
+            borderColor = borderColor
+        ) {
+            ProfileServiceRow(
                 icon = accountIcon,
                 title = "账号切换",
                 onClick = onAccountManageClick,
                 iconTint = iOSOrange,
-                textColor = contentColor
+                textColor = textColor
             )
-            
-            // [Merged] 退出登录 / 立即登录
-            IOSClickableItem(
-                title = if (isLogin) "退出登录" else "立即登录", // [New] Dynamic text
-                onClick = onLogout,
-                textColor = if (isLogin) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.primary, // Red for logout, Blue for login
-                centered = true,
-                showChevron = false
+        }
+        Surface(
+            modifier = Modifier.fillMaxWidth(),
+            shape = RoundedCornerShape(22.dp),
+            color = containerColor.copy(alpha = 0.72f),
+            border = borderColor?.let { BorderStroke(0.5.dp, it.copy(alpha = 0.72f)) },
+            shadowElevation = 0.dp,
+            tonalElevation = 0.dp
+        ) {
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .heightIn(min = 52.dp)
+                    .clickable(onClick = onLogout)
+                    .padding(horizontal = 16.dp, vertical = 12.dp),
+                contentAlignment = Alignment.Center
+            ) {
+                Text(
+                    text = if (isLogin) "退出登录" else "立即登录",
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.SemiBold,
+                    color = if (isLogin) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.primary,
+                    maxLines = 1
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun ProfileFavoriteFolderShortcutGrid(
+    shortcuts: List<ProfileFavoriteFolderShortcut>,
+    onFavoriteFolderClick: (Long, Long, String) -> Unit,
+    contentColor: Color,
+    compactHorizontal: Boolean = false,
+    onMoreClick: (() -> Unit)? = null,
+    modifier: Modifier = Modifier
+) {
+    val folderIcon = rememberAppFolderIcon()
+    if (compactHorizontal) {
+        Row(
+            modifier = modifier
+                .fillMaxWidth()
+                .horizontalScroll(rememberScrollState()),
+            horizontalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            shortcuts.take(3).forEach { shortcut ->
+                ProfileFavoriteFolderShortcutChip(
+                    shortcut = shortcut,
+                    icon = folderIcon,
+                    contentColor = contentColor,
+                    compact = true,
+                    onClick = {
+                        onFavoriteFolderClick(shortcut.mediaId, shortcut.ownerMid, shortcut.title)
+                    },
+                    modifier = Modifier.width(148.dp)
+                )
+            }
+            if (shortcuts.size > 3 && onMoreClick != null) {
+                ProfileFavoriteFolderMoreChip(
+                    contentColor = contentColor,
+                    onClick = onMoreClick,
+                    modifier = Modifier.width(112.dp)
+                )
+            }
+        }
+        return
+    }
+    Column(
+        modifier = modifier.fillMaxWidth(),
+        verticalArrangement = Arrangement.spacedBy(8.dp)
+    ) {
+        shortcuts.chunked(2).forEach { rowShortcuts ->
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                rowShortcuts.forEach { shortcut ->
+                    ProfileFavoriteFolderShortcutChip(
+                        shortcut = shortcut,
+                        icon = folderIcon,
+                        contentColor = contentColor,
+                        onClick = {
+                            onFavoriteFolderClick(shortcut.mediaId, shortcut.ownerMid, shortcut.title)
+                        },
+                        modifier = Modifier.weight(1f)
+                    )
+                }
+                if (rowShortcuts.size < 2) {
+                    Spacer(modifier = Modifier.weight(1f))
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun ProfileFavoriteFolderShortcutChip(
+    shortcut: ProfileFavoriteFolderShortcut,
+    icon: ImageVector,
+    contentColor: Color,
+    onClick: () -> Unit,
+    compact: Boolean = false,
+    modifier: Modifier = Modifier
+) {
+    Row(
+        modifier = modifier
+            .heightIn(min = if (compact) 42.dp else 48.dp)
+            .clip(RoundedCornerShape(14.dp))
+            .background(MaterialTheme.colorScheme.surface.copy(alpha = if (compact) 0.22f else 0.28f))
+            .clickable(onClick = onClick)
+            .padding(horizontal = if (compact) 9.dp else 10.dp, vertical = if (compact) 7.dp else 8.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Icon(
+            imageVector = icon,
+            contentDescription = null,
+            tint = iOSYellow,
+            modifier = Modifier.size(if (compact) 18.dp else 20.dp)
+        )
+        Spacer(modifier = Modifier.width(if (compact) 7.dp else 8.dp))
+        Column(modifier = Modifier.weight(1f)) {
+            Text(
+                text = shortcut.title,
+                color = contentColor,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                style = if (compact) MaterialTheme.typography.labelMedium else MaterialTheme.typography.labelLarge,
+                fontWeight = FontWeight.SemiBold
+            )
+            Text(
+                text = "${shortcut.mediaCount} 个内容",
+                color = contentColor.copy(alpha = 0.62f),
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                style = MaterialTheme.typography.labelSmall
             )
         }
     }
+}
+
+@Composable
+private fun ProfileFavoriteFolderMoreChip(
+    contentColor: Color,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    Box(
+        modifier = modifier
+            .heightIn(min = 42.dp)
+            .clip(RoundedCornerShape(14.dp))
+            .background(MaterialTheme.colorScheme.surface.copy(alpha = 0.18f))
+            .clickable(onClick = onClick)
+            .padding(horizontal = 12.dp, vertical = 8.dp),
+        contentAlignment = Alignment.Center
+    ) {
+        Text(
+            text = "更多收藏夹",
+            color = contentColor,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+            style = MaterialTheme.typography.labelMedium,
+            fontWeight = FontWeight.SemiBold
+        )
     }
 }
 

@@ -6,7 +6,6 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.SegmentedButton
 import androidx.compose.material3.SegmentedButtonDefaults
@@ -32,6 +31,8 @@ import com.android.purebilibili.core.theme.LocalUiPreset
 import com.android.purebilibili.core.theme.LocalAndroidNativeVariant
 import com.android.purebilibili.core.theme.AndroidNativeVariant
 import com.android.purebilibili.core.theme.UiPreset
+import com.android.purebilibili.core.ui.AppShapes
+import com.android.purebilibili.core.ui.ContainerLevel
 import com.android.purebilibili.feature.home.components.BOTTOM_BAR_LIQUID_SEGMENTED_CONTROL_HEIGHT_DP
 import com.android.purebilibili.feature.home.components.BOTTOM_BAR_LIQUID_SEGMENTED_CONTROL_INDICATOR_HEIGHT_DP
 import com.android.purebilibili.feature.home.components.BottomBarLiquidSegmentedControl
@@ -163,6 +164,7 @@ internal fun <T> IOSSlidingSegmentedControl(
     indicatorHeight: Dp = BOTTOM_BAR_LIQUID_SEGMENTED_CONTROL_INDICATOR_HEIGHT_DP.dp,
     labelFontSize: TextUnit = 14.sp,
     backdrop: Backdrop? = null,
+    tapPressRefractionEnabled: Boolean = true,
     onSelectionChange: (T) -> Unit
 ) {
     if (options.isEmpty()) return
@@ -199,6 +201,7 @@ internal fun <T> IOSSlidingSegmentedControl(
         indicatorHeight = indicatorHeight,
         labelFontSize = labelFontSize,
         backdrop = backdrop,
+        tapPressRefractionEnabled = tapPressRefractionEnabled,
         onSelectionChange = onSelectionChange
     )
 }
@@ -237,7 +240,9 @@ private fun <T> Md3SegmentedControl(
     Box(
         modifier = modifier
             .fillMaxWidth()
-            .clip(RoundedCornerShape(24.dp))
+            // Outer segmented container uses the preset-aware pill radius
+            // (iOS 10 / MD3 28 / Miuix 22dp) — replaces the hardcoded 24dp.
+            .clip(AppShapes.container(ContainerLevel.Pill))
             .background(colorTokens.outerContainerColor)
             .padding(4.dp)
     ) {
@@ -290,6 +295,7 @@ private fun <T> IOSSlidingSegmentedControlImpl(
     indicatorHeight: Dp = BOTTOM_BAR_LIQUID_SEGMENTED_CONTROL_INDICATOR_HEIGHT_DP.dp,
     labelFontSize: TextUnit = 14.sp,
     backdrop: Backdrop? = null,
+    tapPressRefractionEnabled: Boolean = true,
     onSelectionChange: (T) -> Unit
 ) {
     val selectedIndex = resolveSelectionIndex(options = options, selectedValue = selectedValue)
@@ -307,6 +313,7 @@ private fun <T> IOSSlidingSegmentedControlImpl(
         indicatorHeight = indicatorHeight,
         labelFontSize = labelFontSize,
         backdrop = backdrop,
-        forceLiquidChrome = forceLiquidIndicator
+        forceLiquidChrome = forceLiquidIndicator,
+        tapPressRefractionEnabled = tapPressRefractionEnabled
     )
 }

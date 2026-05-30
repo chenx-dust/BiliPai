@@ -3,10 +3,43 @@ package com.android.purebilibili.feature.dynamic.components
 import androidx.compose.ui.geometry.Rect
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFalse
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
 class ImagePreviewTransitionPolicyTest {
+
+    @Test
+    fun shouldHandleImagePreviewLongPressSave_respectsUserSwitchAndBusyState() {
+        assertTrue(
+            shouldHandleImagePreviewLongPressSave(
+                longPressSaveEnabled = true,
+                imageUrl = "https://i0.hdslb.com/test.jpg",
+                isSaving = false
+            )
+        )
+        assertFalse(
+            shouldHandleImagePreviewLongPressSave(
+                longPressSaveEnabled = false,
+                imageUrl = "https://i0.hdslb.com/test.jpg",
+                isSaving = false
+            )
+        )
+        assertFalse(
+            shouldHandleImagePreviewLongPressSave(
+                longPressSaveEnabled = true,
+                imageUrl = "",
+                isSaving = false
+            )
+        )
+        assertFalse(
+            shouldHandleImagePreviewLongPressSave(
+                longPressSaveEnabled = true,
+                imageUrl = "https://i0.hdslb.com/test.jpg",
+                isSaving = true
+            )
+        )
+    }
 
     @Test
     fun resolveImagePreviewTransitionFrame_clampsVisualProgressButKeepsLayoutOvershoot() {
@@ -49,19 +82,6 @@ class ImagePreviewTransitionPolicyTest {
 
         assertEquals(0f, motion.overshootTarget)
         assertEquals(0f, motion.settleTarget)
-    }
-
-    @Test
-    fun resolvePredictiveBackAnimationProgress_isInverseOfGestureProgress() {
-        assertEquals(1f, resolvePredictiveBackAnimationProgress(0f))
-        assertEquals(0.5f, resolvePredictiveBackAnimationProgress(0.5f))
-        assertEquals(0f, resolvePredictiveBackAnimationProgress(1f))
-    }
-
-    @Test
-    fun resolvePredictiveBackAnimationProgress_clampsOutOfRangeInput() {
-        assertEquals(1f, resolvePredictiveBackAnimationProgress(-0.3f))
-        assertEquals(0f, resolvePredictiveBackAnimationProgress(1.6f))
     }
 
     @Test

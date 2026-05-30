@@ -1,8 +1,11 @@
 package com.android.purebilibili.core.ui.animation
 
 import com.android.purebilibili.core.ui.motion.resolveBottomBarMotionSpec
+import java.io.File
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFalse
+import kotlin.test.assertTrue
 
 class DampedDragAnimationPolicyTest {
 
@@ -53,5 +56,78 @@ class DampedDragAnimationPolicyTest {
                 itemWidthPx = 0f
             )
         )
+    }
+
+    @Test
+    fun `drag position snaps immediately while glass offset uses damped spring`() {
+        val source = listOf(
+            File("app/src/main/java/com/android/purebilibili/core/ui/animation/DampedDragAnimation.kt"),
+            File("src/main/java/com/android/purebilibili/core/ui/animation/DampedDragAnimation.kt")
+        ).first { it.exists() }.readText()
+        val dragSource = source
+            .substringAfter("fun onDrag(")
+            .substringBefore("fun setPressed(pressed: Boolean)")
+        val releaseSource = source
+            .substringAfter("fun onDragEnd(")
+            .substringBefore("fun updateIndex(index: Int)")
+
+        // 指示器位置必须即时更新,否则底栏/首页指示器会像失去滑动能力。
+        // 玻璃偏移单独走阻尼弹簧,只过滤折射采样抖动。
+        assertTrue(source.contains("private val dragFollowSpring = spring<Float>("))
+        assertTrue(dragSource.contains("animatable.snapTo(newValue)"))
+        assertTrue(dragSource.contains("offsetAnimation.animateTo(desiredDragOffsetPx, dragFollowSpring)"))
+        assertFalse(dragSource.contains("animatable.animateTo(newValue, dragFollowSpring)"))
+        assertTrue(dragSource.contains("dragVelocityItemsPerSecond = resolveDampedDragVelocityItemsPerSecond("))
+        assertTrue(releaseSource.contains("animatable.animateTo("))
+        assertTrue(releaseSource.contains("offsetAnimation.animateTo(0f"))
+    }
+
+    @Test
+    fun `drag gesture forwards live velocity for indicator deformation`() {
+        val source = listOf(
+            File("app/src/main/java/com/android/purebilibili/core/ui/animation/DampedDragAnimation.kt"),
+            File("src/main/java/com/android/purebilibili/core/ui/animation/DampedDragAnimation.kt")
+        ).first { it.exists() }.readText()
+
+        assertTrue(source.contains("val deformationVelocityItemsPerSecond: Float"))
+        assertTrue(source.contains("val velocity = velocityTracker.calculateVelocity()"))
+        assertTrue(source.contains("dragState.onDrag(dragAmount, itemWidthPx, velocity.x)"))
+    }
+
+    @Test
+    fun `release settle pulse is emitted only after drag release settles`() {
+        val source = listOf(
+            File("app/src/main/java/com/android/purebilibili/core/ui/animation/DampedDragAnimation.kt"),
+            File("src/main/java/com/android/purebilibili/core/ui/animation/DampedDragAnimation.kt")
+        ).first { it.exists() }.readText()
+        val releaseSource = source
+            .substringAfter("fun onDragEnd(")
+            .substringBefore("fun updateIndex(index: Int)")
+        val updateIndexSource = source
+            .substringAfter("fun updateIndex(index: Int)")
+            .substringBefore("}\n}\n\n/**\n * 创建并记住阻尼拖拽动画状态")
+
+        assertTrue(source.contains("var settledReleaseCount by mutableIntStateOf(0)"))
+        assertTrue(releaseSource.contains("settledReleaseCount += 1"))
+        assertFalse(updateIndexSource.contains("settledReleaseCount += 1"))
+    }
+
+    @Test
+    fun `click index update keeps press progress until target settles`() {
+        val source = listOf(
+            File("app/src/main/java/com/android/purebilibili/core/ui/animation/DampedDragAnimation.kt"),
+            File("src/main/java/com/android/purebilibili/core/ui/animation/DampedDragAnimation.kt")
+        ).first { it.exists() }.readText()
+        val updateIndexSource = source
+            .substringAfter("fun updateIndex(index: Int)")
+            .substringBefore("}\n}\n\n/**\n * 创建并记住阻尼拖拽动画状态")
+
+        assertTrue(updateIndexSource.contains("pressProgressAnimation.animateTo(1f"))
+        assertTrue(updateIndexSource.contains("animatable.animateTo("))
+        assertTrue(updateIndexSource.contains("pressProgressAnimation.animateTo(0f"))
+        assertTrue(updateIndexSource.indexOf("pressProgressAnimation.animateTo(1f") <
+            updateIndexSource.indexOf("animatable.animateTo("))
+        assertTrue(updateIndexSource.indexOf("animatable.animateTo(") <
+            updateIndexSource.indexOf("pressProgressAnimation.animateTo(0f"))
     }
 }

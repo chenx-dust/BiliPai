@@ -51,18 +51,24 @@ import com.android.purebilibili.core.util.HapticType
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.animation.ExperimentalSharedTransitionApi
-import androidx.compose.animation.core.spring
+import androidx.compose.animation.core.tween
 import com.android.purebilibili.core.ui.LocalSharedTransitionScope
 import com.android.purebilibili.core.ui.LocalAnimatedVisibilityScope
-import androidx.compose.ui.graphics.graphicsLayer
+import com.android.purebilibili.core.ui.AppShapes
+import com.android.purebilibili.core.ui.AppSurfaceTokens
+import com.android.purebilibili.core.ui.ContainerLevel
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.contentDescription
 import com.android.purebilibili.core.ui.adaptive.MotionTier
 import com.android.purebilibili.core.ui.components.UpBadgeName
 import com.android.purebilibili.core.ui.components.resolveUpStatsText
+import com.android.purebilibili.core.ui.transition.LocalVideoCardSharedElementSourceRoute
 import com.android.purebilibili.core.ui.transition.VIDEO_SHARED_COVER_ASPECT_RATIO
+import com.android.purebilibili.core.ui.transition.resolveHomeVideoSharedTransitionCornerSpec
+import com.android.purebilibili.core.ui.transition.resolveVideoCardSharedTransitionMotionSpec
+import com.android.purebilibili.core.ui.transition.resolveVideoSharedTransitionOwnership
 import com.android.purebilibili.core.ui.transition.shouldEnableVideoCoverSharedTransition
-import com.android.purebilibili.core.ui.transition.shouldEnableVideoMetadataSharedTransition
+import com.android.purebilibili.core.ui.transition.videoCardShellSharedElementKey
 import com.android.purebilibili.feature.home.resolveHomeCardEnterAnimationEnabledAtMount
 import com.android.purebilibili.feature.home.resolveHomeCardInfoSurfaceAppearance
 import com.android.purebilibili.feature.home.rememberHomeGlassPillColors
@@ -162,6 +168,9 @@ fun ElegantVideoCard(
     animationEnabled: Boolean = true,   //  卡片进场动画开关
     motionTier: MotionTier = MotionTier.Normal,
     transitionEnabled: Boolean = false, //  卡片过渡动画开关
+    sharedElementSourceRoute: String? = null,
+    isReturningFromVideoDetail: Boolean = false,
+    isQuickReturningFromVideoDetail: Boolean = false,
     scrollLiteModeEnabled: Boolean = false,
     showPublishTime: Boolean = false,   //  是否显示发布时间（搜索结果用）
     isDataSaverActive: Boolean = false, // 🚀 [性能优化] 从父级传入，避免每个卡片重复计算
@@ -171,6 +180,7 @@ fun ElegantVideoCard(
     compactStatsOnCover: Boolean = true, // 播放量/评论数是否贴在封面底部
     showCoverGlassBadges: Boolean = true,
     showInfoGlassBadges: Boolean = true,
+    coverShadowEnabled: Boolean = true,
     wallpaperTintEnabled: Boolean = false,
     wallpaperEffectMode: HomeWallpaperEffectMode = HomeWallpaperEffectMode.SOFT_BLUR,
     showUpBadge: Boolean = true,
@@ -183,6 +193,7 @@ fun ElegantVideoCard(
     onUnfavorite: (() -> Unit)? = null,  //  [新增] 取消收藏回调
     dismissMenuText: String = "\uD83D\uDEAB 不感兴趣", //  [新增] 自定义长按菜单删除文案
     onLongClick: ((VideoItem) -> Unit)? = null, // [Feature] Long Press Preview
+    onUpClick: ((Long) -> Unit)? = null,
     modifier: Modifier = Modifier,
     onClick: (String, Long) -> Unit
 ) {
@@ -206,8 +217,9 @@ fun ElegantVideoCard(
             FormatUtils.formatProgress(video.progress, video.duration)
         }
     }
-    val primaryStatBadgeMinWidth = remember(primaryStatText) {
-        resolveVideoCardPrimaryStatBadgeMinWidthDp(primaryStatText).dp
+    val secondaryStatText = remember(video.stat.reply, video.stat.danmaku) {
+        val commentCount = video.stat.reply.takeIf { it > 0 } ?: video.stat.danmaku
+        commentCount.takeIf { it > 0 }?.let { FormatUtils.formatStat(it.toLong()) }
     }
     val durationBadgeMinWidth = remember(durationText, durationBadgeStyle) {
         resolveVideoCardDurationBadgeMinWidthDp(
@@ -231,9 +243,9 @@ fun ElegantVideoCard(
         glassEnabled = glassEnabled,
         blurEnabled = blurEnabled,
         emphasized = false,
-        baseColor = MaterialTheme.colorScheme.surface
+        baseColor = AppSurfaceTokens.cardContainer()
     )
-    val isDarkCardTheme = MaterialTheme.colorScheme.background.luminance() < 0.5f
+    val isDarkCardTheme = AppSurfaceTokens.chromeBackground().luminance() < 0.5f
     val infoSurfaceAppearance = remember(wallpaperTintEnabled, wallpaperEffectMode, isDarkCardTheme, isDataSaverActive) {
         resolveHomeCardInfoSurfaceAppearance(
             wallpaperTintEnabled = wallpaperTintEnabled,
@@ -248,6 +260,7 @@ fun ElegantVideoCard(
             compactStatsOnCover = compactStatsOnCover
         )
     }
+    val coverShadowElevation = if (coverShadowEnabled) scrollLitePolicy.coverShadowElevationDp.dp else 0.dp
     val badgeStylePolicy = remember(showCoverGlassBadges, showInfoGlassBadges) {
         resolveHomeVideoGlassBadgeStylePolicy(
             showCoverGlassBadges = showCoverGlassBadges,
@@ -272,6 +285,11 @@ fun ElegantVideoCard(
     val historyProgressBarColor = resolveVideoCardHistoryProgressBarColor(
         themePrimary = MaterialTheme.colorScheme.primary
     )
+    val coverOverlayBottomLayout = remember(scrollLitePolicy.showHistoryProgressBar, showHistoryProgressBar) {
+        resolveVideoCardCoverOverlayBottomLayout(
+            showHistoryProgressBar = scrollLitePolicy.showHistoryProgressBar && showHistoryProgressBar
+        )
+    }
     
     //  [新增] 长按删除菜单状态
     var showDismissMenu by remember { mutableStateOf(false) }
@@ -337,6 +355,10 @@ fun ElegantVideoCard(
     val coverBoundsRef = remember { object { var value: androidx.compose.ui.geometry.Rect? = null } }
     val titleBoundsRef = remember { object { var value: androidx.compose.ui.geometry.Rect? = null } }
     val menuButtonBoundsRef = remember { object { var value: androidx.compose.ui.geometry.Rect? = null } }
+    val localSharedElementSourceRoute = LocalVideoCardSharedElementSourceRoute.current
+    val effectiveSharedElementSourceRoute = remember(sharedElementSourceRoute, localSharedElementSourceRoute) {
+        sharedElementSourceRoute ?: localSharedElementSourceRoute
+    }
 
     val openDismissMenu: (androidx.compose.ui.geometry.Rect?, Offset?) -> Unit = { anchorBounds, pressOffset ->
         menuOffset = resolveVideoCardMenuOffset(
@@ -350,10 +372,12 @@ fun ElegantVideoCard(
     
     val triggerCardClick = {
         cardBoundsRef.value?.let { bounds ->
-            CardPositionManager.recordCardPosition(
-                bounds,
-                screenWidthPx,
-                screenHeightPx,
+            CardPositionManager.recordVideoCardPosition(
+                bvid = video.bvid,
+                sourceRoute = effectiveSharedElementSourceRoute,
+                bounds = bounds,
+                screenWidth = screenWidthPx,
+                screenHeight = screenHeightPx,
                 density = densityValue
             )
         }
@@ -362,11 +386,10 @@ fun ElegantVideoCard(
     val enterAnimationEnabledAtMount = remember(video.bvid) {
         resolveHomeCardEnterAnimationEnabledAtMount(
             baseAnimationEnabled = animationEnabled,
-            isReturningFromDetail = CardPositionManager.isReturningFromDetail,
+            isReturningFromDetail = isReturningFromVideoDetail,
             isSwitchingCategory = CardPositionManager.isSwitchingCategory
         )
     }
-
     Box(
         modifier = Modifier
             .then(modifier)
@@ -385,12 +408,39 @@ fun ElegantVideoCard(
             }
             .padding(bottom = 12.dp)
     ) {
+        //  尝试获取共享元素作用域。首页点击视频时，由卡片主容器承载整体放大/回收。
+        val sharedTransitionScope = LocalSharedTransitionScope.current
+        val animatedVisibilityScope = LocalAnimatedVisibilityScope.current
+        val coverSharedEnabled = shouldEnableVideoCoverSharedTransition(
+            transitionEnabled = transitionEnabled,
+            hasSharedTransitionScope = sharedTransitionScope != null,
+            hasAnimatedVisibilityScope = animatedVisibilityScope != null
+        )
+        val isQuickReturnLimited = isReturningFromVideoDetail && isQuickReturningFromVideoDetail
+        val sharedTransitionOwnership = resolveVideoSharedTransitionOwnership(
+            sourceRoute = effectiveSharedElementSourceRoute,
+            coverSharedEnabled = coverSharedEnabled,
+            isQuickReturnLimited = isQuickReturnLimited
+        )
+        val homeSharedTransitionMotionSpec = remember(effectiveSharedElementSourceRoute, transitionEnabled) {
+            resolveVideoCardSharedTransitionMotionSpec(
+                sourceRoute = effectiveSharedElementSourceRoute,
+                transitionEnabled = transitionEnabled
+            )
+        }
+        val homeSharedTransitionCornerSpec = remember(effectiveSharedElementSourceRoute, transitionEnabled) {
+            resolveHomeVideoSharedTransitionCornerSpec(
+                sourceRoute = effectiveSharedElementSourceRoute,
+                transitionEnabled = transitionEnabled
+            )
+        }
+        val useCardShellSharedBounds = coverSharedEnabled && !effectiveSharedElementSourceRoute.isNullOrBlank()
         val connectedCardShape = remember(cardCornerRadius) { RoundedCornerShape(cardCornerRadius) }
         val cardContainerModifier = if (infoSurfaceAppearance.useTintedSurface) {
             Modifier
                 .fillMaxWidth()
                 .shadow(
-                    elevation = scrollLitePolicy.coverShadowElevationDp.dp,
+                    elevation = coverShadowElevation,
                     shape = connectedCardShape,
                     ambientColor = Color.Black.copy(alpha = 0.08f),
                     spotColor = Color.Black.copy(alpha = 0.10f),
@@ -399,44 +449,40 @@ fun ElegantVideoCard(
         } else {
             Modifier.fillMaxWidth()
         }
-        Column(
-            modifier = cardContainerModifier
-        ) {
-        //  尝试获取共享元素作用域
-        val sharedTransitionScope = LocalSharedTransitionScope.current
-        val animatedVisibilityScope = LocalAnimatedVisibilityScope.current
-        val coverSharedEnabled = shouldEnableVideoCoverSharedTransition(
-            transitionEnabled = transitionEnabled,
-            hasSharedTransitionScope = sharedTransitionScope != null,
-            hasAnimatedVisibilityScope = animatedVisibilityScope != null
-        )
-        val metadataSharedEnabled = shouldEnableVideoMetadataSharedTransition(
-            coverSharedEnabled = coverSharedEnabled,
-            isQuickReturnLimited = CardPositionManager.shouldLimitSharedElementsForQuickReturn()
-        )
-        
-        //  封面容器 - 官方 B 站风格，支持共享元素过渡（受开关控制）
-        val coverModifier = if (coverSharedEnabled) {
+        val cardShellModifier = if (useCardShellSharedBounds) {
             with(requireNotNull(sharedTransitionScope)) {
-                Modifier
-                    .sharedBounds(
-                        sharedContentState = rememberSharedContentState(key = "video_cover_${video.bvid}"),
-                        animatedVisibilityScope = requireNotNull(animatedVisibilityScope),
-                        //  添加回弹效果的 spring 动画
-                        boundsTransform = { _, _ ->
-                            com.android.purebilibili.core.theme.AnimationSpecs.BiliPaiSpringSpec
-                        },
-                        clipInOverlayDuringTransition = OverlayClip(
-                            RoundedCornerShape(cardCornerRadius)  //  过渡时保持动态圆角
+                Modifier.sharedBounds(
+                    sharedContentState = rememberSharedContentState(
+                        key = videoCardShellSharedElementKey(
+                            video.bvid,
+                            sourceRoute = effectiveSharedElementSourceRoute
                         )
-                    )
+                    ),
+                    animatedVisibilityScope = requireNotNull(animatedVisibilityScope),
+                    boundsTransform = { _, _ ->
+                        tween(
+                            durationMillis = homeSharedTransitionMotionSpec.durationMillis,
+                            easing = homeSharedTransitionMotionSpec.easing
+                        )
+                    },
+                    clipInOverlayDuringTransition = OverlayClip(connectedCardShape)
+                )
             }
         } else {
             Modifier
         }
+        Column(
+            modifier = cardContainerModifier
+                .then(cardShellModifier)
+        ) {
+            val metadataSharedEnabled = sharedTransitionOwnership.useMetadataSharedBounds
         
         //  [性能优化] 封面圆角形状缓存（避免重组时重复创建）
-        val coverShape = remember(cardCornerRadius, infoSurfaceAppearance.useTintedSurface) {
+        val coverShape = remember(
+            cardCornerRadius,
+            infoSurfaceAppearance.useTintedSurface,
+            homeSharedTransitionCornerSpec
+        ) {
             if (infoSurfaceAppearance.useTintedSurface) {
                 RoundedCornerShape(
                     topStart = cardCornerRadius,
@@ -445,8 +491,37 @@ fun ElegantVideoCard(
                     bottomEnd = 0.dp
                 )
             } else {
-                RoundedCornerShape(cardCornerRadius)
+                RoundedCornerShape(
+                    if (homeSharedTransitionCornerSpec.enabled) {
+                        homeSharedTransitionCornerSpec.startCornerDp.dp
+                    } else {
+                        cardCornerRadius
+                    }
+                )
             }
+        }
+
+        val coverModifier = if (sharedTransitionOwnership.useCoverSharedBounds && !useCardShellSharedBounds) {
+            with(requireNotNull(sharedTransitionScope)) {
+                Modifier.sharedBounds(
+                    sharedContentState = rememberSharedContentState(
+                        key = com.android.purebilibili.core.ui.transition.videoCoverSharedElementKey(
+                            video.bvid,
+                            sourceRoute = effectiveSharedElementSourceRoute
+                        )
+                    ),
+                    animatedVisibilityScope = requireNotNull(animatedVisibilityScope),
+                    boundsTransform = { _, _ ->
+                        tween(
+                            durationMillis = homeSharedTransitionMotionSpec.durationMillis,
+                            easing = homeSharedTransitionMotionSpec.easing
+                        )
+                    },
+                    clipInOverlayDuringTransition = OverlayClip(coverShape)
+                )
+            }
+        } else {
+            Modifier
         }
 
         Box(
@@ -455,7 +530,7 @@ fun ElegantVideoCard(
                 .aspectRatio(VIDEO_SHARED_COVER_ASPECT_RATIO)
                 // [性能优化] 使用 shadow(clip = true) 合并裁剪和阴影层，避免创建额外的 GraphicsLayer
                 .shadow(
-                    elevation = if (infoSurfaceAppearance.useTintedSurface) 0.dp else scrollLitePolicy.coverShadowElevationDp.dp,
+                    elevation = if (infoSurfaceAppearance.useTintedSurface) 0.dp else coverShadowElevation,
                     shape = coverShape,
                     ambientColor = androidx.compose.ui.graphics.Color.Black.copy(alpha = 0.08f),
                     spotColor = androidx.compose.ui.graphics.Color.Black.copy(alpha = 0.10f),
@@ -489,21 +564,6 @@ fun ElegantVideoCard(
                     )
                 }
         ) {
-            // [新增] 监听共享元素归位（即封面重新可见时），触发轻微震动反馈
-            // 注意：当从详情页返回时，sharedElement 动画结束，封面会从不可见变为可见
-            if (metadataSharedEnabled) {
-                with(requireNotNull(sharedTransitionScope)) {
-                     // 使用 renderInSharedTransitionScopeOverlayOption 控制可见性
-                     // 但此处我们可以利用 SideEffect 或 LaunchedEffect 监听
-                }
-                
-                // 简单方案：当 VideoCard 重新组合且处于可见状态时（通常意味着转场结束）
-                // 但 Compose 重组频繁，需结合 CardPositionManager.isReturningFromDetail 状态
-                
-                // 优化方案：我们在 sharedElement 的 boundsTransform 中无法直接触发副作用
-                // 暂时方案：依靠 SharedTransitionScope 的 renderInOverlay 属性变化难以捕捉
-                // 替代方案：在 VideoPlayerSection 退出时触发一次，或者在 CardPositionManager 中管理
-            }
             // 🚀 [性能优化] 使用从父级传入的 isDataSaverActive，避免每个卡片重复计算
             val imageWidth = if (isDataSaverActive) 240 else 360
             val imageHeight = if (isDataSaverActive) 150 else 225
@@ -567,7 +627,7 @@ fun ElegantVideoCard(
                     modifier = Modifier
                         .align(Alignment.BottomStart)
                         .fillMaxWidth()
-                        .height(2.dp)
+                        .height(coverOverlayBottomLayout.historyProgressBarHeightDp.dp)
                         .background(Color.White.copy(alpha = 0.24f))
                 )
                 if (historyProgressFraction > 0f) {
@@ -575,34 +635,59 @@ fun ElegantVideoCard(
                         modifier = Modifier
                             .align(Alignment.BottomStart)
                             .fillMaxWidth(historyProgressFraction)
-                            .height(2.dp)
+                            .height(coverOverlayBottomLayout.historyProgressBarHeightDp.dp)
                             .background(historyProgressBarColor)
                     )
                 }
             }
 
             if (scrollLitePolicy.showCompactStatsOnCover) {
-                Row(
+                BoxWithConstraints(
                     modifier = Modifier
                         .align(Alignment.BottomStart)
                         .fillMaxWidth()
-                        .padding(horizontal = 8.dp, vertical = 6.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                        .padding(
+                            start = 8.dp,
+                            top = 6.dp,
+                            end = 8.dp,
+                            bottom = coverOverlayBottomLayout.compactStatsBottomPaddingDp.dp
+                        )
                 ) {
+                    val compactStatsLayout = remember(
+                        maxWidth,
+                        primaryStatText,
+                        secondaryStatText,
+                        onlineCount,
+                        showDurationBadge,
+                        durationBadgeMinWidth
+                    ) {
+                        resolveVideoCardCompactCoverStatsLayout(
+                            availableWidthDp = maxWidth.value,
+                            primaryStatText = primaryStatText,
+                            secondaryStatText = secondaryStatText,
+                            hasOnlineCount = onlineCount.isNotEmpty(),
+                            durationBadgeMinWidthDp = if (showDurationBadge) {
+                                durationBadgeMinWidth.value
+                            } else {
+                                0f
+                            }
+                        )
+                    }
                     Row(
-                        modifier = Modifier.weight(1f),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(end = compactStatsLayout.statsEndPaddingDp.dp),
                         verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.spacedBy(6.dp)
                     ) {
-                        var viewsOnCoverModifier = Modifier.widthIn(min = primaryStatBadgeMinWidth)
+                        var viewsOnCoverModifier = Modifier.widthIn(min = compactStatsLayout.primaryMinWidthDp.dp)
                         if (metadataSharedEnabled) {
                             with(requireNotNull(sharedTransitionScope)) {
                                 viewsOnCoverModifier = viewsOnCoverModifier.sharedBounds(
-                                    sharedContentState = rememberSharedContentState(key = "video_views_${video.bvid}"),
+                                    sharedContentState = rememberSharedContentState(key = com.android.purebilibili.core.ui.transition.videoViewsSharedElementKey(video.bvid)),
                                     animatedVisibilityScope = requireNotNull(animatedVisibilityScope),
                                     boundsTransform = { _, _ ->
-                                        com.android.purebilibili.core.theme.AnimationSpecs.BiliPaiSpringSpec
+                                        com.android.purebilibili.core.ui.motion.AppMotionTokens.spatialSpec()
                                     }
                                 )
                             }
@@ -610,7 +695,7 @@ fun ElegantVideoCard(
                         HomeVideoBadgePill(
                             modifier = viewsOnCoverModifier,
                             style = badgeStylePolicy.coverStyle,
-                            shape = RoundedCornerShape(999.dp),
+                            shape = AppShapes.container(ContainerLevel.Pill),
                             containerColor = coverPillColors.containerColor,
                             borderColor = coverPillColors.borderColor
                         ) {
@@ -631,12 +716,11 @@ fun ElegantVideoCard(
                             )
                         }
 
-                        val commentCount = video.stat.reply.takeIf { it > 0 } ?: video.stat.danmaku
-                        if (commentCount > 0) {
+                        if (compactStatsLayout.showSecondaryStat && secondaryStatText != null) {
                             HomeVideoBadgePill(
-                                modifier = Modifier.weight(1f, fill = false),
+                                modifier = Modifier.widthIn(min = compactStatsLayout.secondaryMinWidthDp.dp),
                                 style = badgeStylePolicy.coverStyle,
-                                shape = RoundedCornerShape(999.dp),
+                                shape = AppShapes.container(ContainerLevel.Pill),
                                 containerColor = coverPillColors.containerColor,
                                 borderColor = coverPillColors.borderColor
                             ) {
@@ -647,7 +731,7 @@ fun ElegantVideoCard(
                                     tint = Color.White.copy(alpha = 0.90f)
                                 )
                                 Text(
-                                    text = FormatUtils.formatStat(commentCount.toLong()),
+                                    text = secondaryStatText,
                                     color = Color.White.copy(alpha = 0.90f),
                                     fontSize = 11.sp,
                                     fontWeight = FontWeight.Medium,
@@ -658,11 +742,11 @@ fun ElegantVideoCard(
                             }
                         }
 
-                        if (onlineCount.isNotEmpty()) {
+                        if (compactStatsLayout.showOnlineCount) {
                             HomeVideoBadgePill(
                                 modifier = Modifier.weight(1f, fill = false),
                                 style = badgeStylePolicy.coverStyle,
-                                shape = RoundedCornerShape(999.dp),
+                                shape = AppShapes.container(ContainerLevel.Pill),
                                 containerColor = coverPillColors.containerColor,
                                 borderColor = coverPillColors.borderColor
                             ) {
@@ -688,6 +772,7 @@ fun ElegantVideoCard(
                     //  时长标签 (与播放量/评论数同行对齐)
                     if (showDurationBadge && badgeStylePolicy.coverStyle == HomeVideoBadgeStyle.GLASS) {
                         Surface(
+                            modifier = Modifier.align(Alignment.BottomEnd),
                             shape = RoundedCornerShape(smallCornerRadius),
                             color = emphasizedCoverPillColors.containerColor,
                             border = BorderStroke(0.8.dp, emphasizedCoverPillColors.borderColor)
@@ -726,7 +811,8 @@ fun ElegantVideoCard(
                                     offset = Offset(0f, 1f),
                                     blurRadius = durationBadgeStyle.textShadowBlurRadiusPx
                                 )
-                            )
+                            ),
+                            modifier = Modifier.align(Alignment.BottomEnd)
                         )
                     }
                 }
@@ -736,7 +822,12 @@ fun ElegantVideoCard(
                     Surface(
                         modifier = Modifier
                             .align(Alignment.BottomEnd)
-                            .padding(6.dp),
+                            .padding(
+                                start = 6.dp,
+                                top = 6.dp,
+                                end = 6.dp,
+                                bottom = coverOverlayBottomLayout.floatingDurationBottomPaddingDp.dp
+                            ),
                         shape = RoundedCornerShape(smallCornerRadius),
                         color = emphasizedCoverPillColors.containerColor,
                         border = BorderStroke(0.8.dp, emphasizedCoverPillColors.borderColor)
@@ -778,7 +869,12 @@ fun ElegantVideoCard(
                         ),
                         modifier = Modifier
                             .align(Alignment.BottomEnd)
-                            .padding(10.dp)
+                            .padding(
+                                start = 10.dp,
+                                top = 10.dp,
+                                end = 10.dp,
+                                bottom = coverOverlayBottomLayout.floatingDurationBottomPaddingDp.dp
+                            )
                     )
                 }
             }
@@ -797,7 +893,7 @@ fun ElegantVideoCard(
             Modifier
                 .fillMaxWidth()
                 .background(
-                    color = MaterialTheme.colorScheme.surface.copy(alpha = infoSurfaceAppearance.containerAlpha),
+                    color = AppSurfaceTokens.cardContainer().copy(alpha = infoSurfaceAppearance.containerAlpha),
                     shape = infoSurfaceShape
                 )
                 .border(
@@ -830,10 +926,10 @@ fun ElegantVideoCard(
             if (metadataSharedEnabled) {
                 with(requireNotNull(sharedTransitionScope)) {
                     titleModifier = titleModifier.sharedBounds(
-                        sharedContentState = rememberSharedContentState(key = "video_title_${video.bvid}"),
+                        sharedContentState = rememberSharedContentState(key = com.android.purebilibili.core.ui.transition.videoTitleSharedElementKey(video.bvid)),
                         animatedVisibilityScope = requireNotNull(animatedVisibilityScope),
                         boundsTransform = { _, _ ->
-                            com.android.purebilibili.core.theme.AnimationSpecs.BiliPaiSpringSpec
+                            com.android.purebilibili.core.ui.motion.AppMotionTokens.spatialSpec()
                         }
                     )
                 }
@@ -944,15 +1040,19 @@ fun ElegantVideoCard(
         ) {
             //  [HIG] UP主名称 - 13sp footnote 标准
             //  共享元素过渡 - UP主名称
+            val upClickMid = video.owner.mid.takeIf { it > 0L && onUpClick != null }
             var upNameModifier = Modifier.weight(1f, fill = false)
+            if (upClickMid != null) {
+                upNameModifier = upNameModifier.clickable { onUpClick?.invoke(upClickMid) }
+            }
             
             if (metadataSharedEnabled) {
                 with(requireNotNull(sharedTransitionScope)) {
                     upNameModifier = upNameModifier.sharedBounds(
-                        sharedContentState = rememberSharedContentState(key = "video_up_${video.bvid}"),
+                        sharedContentState = rememberSharedContentState(key = com.android.purebilibili.core.ui.transition.videoUpNameSharedElementKey(video.bvid)),
                         animatedVisibilityScope = requireNotNull(animatedVisibilityScope),
                         boundsTransform = { _, _ ->
-                            com.android.purebilibili.core.theme.AnimationSpecs.BiliPaiSpringSpec
+                            com.android.purebilibili.core.ui.motion.AppMotionTokens.spatialSpec()
                         }
                     )
                 }
@@ -961,10 +1061,10 @@ fun ElegantVideoCard(
             if (metadataSharedEnabled) {
                 with(requireNotNull(sharedTransitionScope)) {
                     followBadgeModifier = followBadgeModifier.sharedBounds(
-                        sharedContentState = rememberSharedContentState(key = "video_up_action_${video.bvid}"),
+                        sharedContentState = rememberSharedContentState(key = com.android.purebilibili.core.ui.transition.videoUpActionSharedElementKey(video.bvid)),
                         animatedVisibilityScope = requireNotNull(animatedVisibilityScope),
                         boundsTransform = { _, _ ->
-                            com.android.purebilibili.core.theme.AnimationSpecs.BiliPaiSpringSpec
+                            com.android.purebilibili.core.ui.motion.AppMotionTokens.spatialSpec()
                         }
                     )
                 }
@@ -981,7 +1081,7 @@ fun ElegantVideoCard(
                         if (badgeStylePolicy.infoStyle == HomeVideoBadgeStyle.GLASS) {
                             Surface(
                                 modifier = followBadgeModifier,
-                                shape = RoundedCornerShape(999.dp),
+                                shape = AppShapes.container(ContainerLevel.Pill),
                                 color = inlinePillColors.containerColor,
                                 border = BorderStroke(0.8.dp, inlinePillColors.borderColor)
                             ) {
@@ -1014,10 +1114,10 @@ fun ElegantVideoCard(
                         if (metadataSharedEnabled) {
                             with(requireNotNull(sharedTransitionScope)) {
                                 avatarModifier = avatarModifier.sharedBounds(
-                                    sharedContentState = rememberSharedContentState(key = "video_avatar_${video.bvid}"),
+                                    sharedContentState = rememberSharedContentState(key = com.android.purebilibili.core.ui.transition.videoAvatarSharedElementKey(video.bvid)),
                                     animatedVisibilityScope = requireNotNull(animatedVisibilityScope),
                                     boundsTransform = { _, _ ->
-                                        com.android.purebilibili.core.theme.AnimationSpecs.BiliPaiSpringSpec
+                                        com.android.purebilibili.core.ui.motion.AppMotionTokens.spatialSpec()
                                     },
                                     clipInOverlayDuringTransition = OverlayClip(CircleShape)
                                 )
@@ -1057,7 +1157,7 @@ fun ElegantVideoCard(
             if (emphasizePublishTime) {
                 Surface(
                     color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.8f),
-                    shape = RoundedCornerShape(999.dp)
+                    shape = AppShapes.container(ContainerLevel.Pill)
                 ) {
                     Text(
                         text = publishTimeRowText,
@@ -1090,10 +1190,10 @@ fun ElegantVideoCard(
                 if (metadataSharedEnabled) {
                     with(requireNotNull(sharedTransitionScope)) {
                         viewsRowModifier = viewsRowModifier.sharedBounds(
-                            sharedContentState = rememberSharedContentState(key = "video_views_${video.bvid}"),
+                            sharedContentState = rememberSharedContentState(key = com.android.purebilibili.core.ui.transition.videoViewsSharedElementKey(video.bvid)),
                             animatedVisibilityScope = requireNotNull(animatedVisibilityScope),
                             boundsTransform = { _, _ ->
-                                com.android.purebilibili.core.theme.AnimationSpecs.BiliPaiSpringSpec
+                                com.android.purebilibili.core.ui.motion.AppMotionTokens.spatialSpec()
                             }
                         )
                     }
@@ -1101,7 +1201,7 @@ fun ElegantVideoCard(
                 Box(modifier = viewsRowModifier) {
                     HomeVideoBadgePill(
                         style = badgeStylePolicy.infoStyle,
-                        shape = RoundedCornerShape(999.dp),
+                        shape = AppShapes.container(ContainerLevel.Pill),
                         containerColor = inlinePillColors.containerColor,
                         borderColor = inlinePillColors.borderColor
                     ) {
@@ -1120,11 +1220,10 @@ fun ElegantVideoCard(
                     }
                 }
 
-                val commentCount = video.stat.reply.takeIf { it > 0 } ?: video.stat.danmaku
-                if (commentCount > 0) {
+                if (secondaryStatText != null) {
                     HomeVideoBadgePill(
                         style = badgeStylePolicy.infoStyle,
-                        shape = RoundedCornerShape(999.dp),
+                        shape = AppShapes.container(ContainerLevel.Pill),
                         containerColor = inlinePillColors.containerColor,
                         borderColor = inlinePillColors.borderColor
                     ) {
@@ -1135,7 +1234,7 @@ fun ElegantVideoCard(
                             tint = MaterialTheme.colorScheme.onSurfaceVariant
                         )
                         Text(
-                            text = FormatUtils.formatStat(commentCount.toLong()),
+                            text = secondaryStatText,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                             fontSize = 11.sp,
                             fontWeight = FontWeight.Medium
@@ -1146,7 +1245,7 @@ fun ElegantVideoCard(
                 if (onlineCount.isNotEmpty()) {
                     HomeVideoBadgePill(
                         style = badgeStylePolicy.infoStyle,
-                        shape = RoundedCornerShape(999.dp),
+                        shape = AppShapes.container(ContainerLevel.Pill),
                         containerColor = inlinePillColors.containerColor,
                         borderColor = inlinePillColors.borderColor
                     ) {
@@ -1170,60 +1269,65 @@ fun ElegantVideoCard(
 
     }
         
-        //  [新增] 长按操作菜单
-        DropdownMenu(
-            expanded = showDismissMenu,
-            onDismissRequest = { showDismissMenu = false },
-            offset = menuOffset
+        // 菜单需要挂在一个本地小锚点上，避免 DropdownMenu 在整张卡片根节点右侧 fallback 时反向偏移。
+        Box(
+            modifier = Modifier
+                .offset(x = menuOffset.x, y = menuOffset.y)
+                .size(1.dp)
         ) {
-            // 稍后再看
-            if (onWatchLater != null) {
-                DropdownMenuItem(
-                    text = { 
-                        Text(
-                            "🕐 稍后再看",
-                            color = MaterialTheme.colorScheme.onSurface
-                        ) 
-                    },
-                    onClick = {
-                        showDismissMenu = false
-                        onWatchLater.invoke()
-                    }
-                )
-            }
-            
-            
-            // 取消收藏 (仅在收藏页显示)
-            if (onUnfavorite != null) {
-                 DropdownMenuItem(
-                    text = { 
-                        Text(
-                            "💔 取消收藏",
-                            color = MaterialTheme.colorScheme.error  // 使用错误色强调删除操作
-                        ) 
-                    },
-                    onClick = {
-                        showDismissMenu = false
-                        // onUnfavorite.invoke() -> 改为弹窗确认
-                        showUnfavoriteDialog = true
-                    }
-                )
-            }
-            
-            // 不感兴趣 (放第一位，方便操作) -> 改回下方
-            if (onDismiss != null) {
-                DropdownMenuItem(
-                    text = { 
-                        Text(
-                            dismissMenuText,
-                            color = MaterialTheme.colorScheme.onSurface
-                        ) 
-                    },
-                    onClick = {
-                        showDismissMenu = false
-                        onDismiss.invoke()
-                    }
-                )
+            DropdownMenu(
+                expanded = showDismissMenu,
+                onDismissRequest = { showDismissMenu = false },
+                offset = DpOffset.Zero
+            ) {
+                // 稍后再看
+                if (onWatchLater != null) {
+                    DropdownMenuItem(
+                        text = {
+                            Text(
+                                "🕐 稍后再看",
+                                color = MaterialTheme.colorScheme.onSurface
+                            )
+                        },
+                        onClick = {
+                            showDismissMenu = false
+                            onWatchLater.invoke()
+                        }
+                    )
+                }
+
+                // 取消收藏 (仅在收藏页显示)
+                if (onUnfavorite != null) {
+                     DropdownMenuItem(
+                        text = {
+                            Text(
+                                "💔 取消收藏",
+                                color = MaterialTheme.colorScheme.error  // 使用错误色强调删除操作
+                            )
+                        },
+                        onClick = {
+                            showDismissMenu = false
+                            // onUnfavorite.invoke() -> 改为弹窗确认
+                            showUnfavoriteDialog = true
+                        }
+                    )
+                }
+
+                // 不感兴趣 (放第一位，方便操作) -> 改回下方
+                if (onDismiss != null) {
+                    DropdownMenuItem(
+                        text = {
+                            Text(
+                                dismissMenuText,
+                                color = MaterialTheme.colorScheme.onSurface
+                            )
+                        },
+                        onClick = {
+                            showDismissMenu = false
+                            onDismiss.invoke()
+                        }
+                    )
+                }
             }
         }
     }

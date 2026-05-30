@@ -4,8 +4,11 @@ import com.android.purebilibili.feature.home.HomeCategory
 
 internal enum class HomePagerSettledAction {
     NONE,
-    SWITCH_CATEGORY,
-    OPEN_LIVE_PAGE
+    SWITCH_CATEGORY
+}
+
+internal fun shouldDisplayHomeTopCategoryInline(category: HomeCategory?): Boolean {
+    return category != null
 }
 
 internal fun shouldSwitchHomeCategoryFromPager(
@@ -40,10 +43,10 @@ internal fun resolveHomePagerSettledAction(
         return HomePagerSettledAction.NONE
     }
 
-    return if (settledCategory == HomeCategory.LIVE) {
-        HomePagerSettledAction.OPEN_LIVE_PAGE
-    } else {
+    return if (shouldDisplayHomeTopCategoryInline(settledCategory)) {
         HomePagerSettledAction.SWITCH_CATEGORY
+    } else {
+        HomePagerSettledAction.NONE
     }
 }
 
@@ -65,5 +68,6 @@ internal fun shouldAnimateHomePagerToCategory(
     if (targetPage < 0) return false
     if (targetPage == pagerCurrentPage) return false
     if (pagerScrolling) return false
+    if (programmaticPageSwitchInProgress) return false
     return true
 }

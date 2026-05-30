@@ -4,6 +4,7 @@ import android.view.SurfaceView
 import android.view.TextureView
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
+import com.android.purebilibili.feature.video.ui.components.GesturePercentMotionDefaults
 import androidx.media3.common.PlaybackParameters
 import androidx.media3.common.Player
 import androidx.media3.ui.PlayerView
@@ -11,6 +12,7 @@ import io.github.alexzhirkevich.cupertino.icons.CupertinoIcons
 import io.github.alexzhirkevich.cupertino.icons.filled.*
 import io.github.alexzhirkevich.cupertino.icons.outlined.*
 import kotlin.math.abs
+import kotlin.math.roundToInt
 
 enum class VideoGestureMode { None, Brightness, Volume, Seek, SwipeToFullscreen }
 
@@ -22,6 +24,7 @@ private const val VIDEO_PLAYER_COVER_REVEAL_HOLD_DELAY_MILLIS = 96
 private const val VIDEO_PLAYER_SURFACE_REVEAL_DURATION_MILLIS = 220
 private const val VIDEO_PLAYER_SURFACE_REVEAL_INITIAL_SCALE = 0.985f
 private const val LONG_PRESS_SPEED_TAP_SUPPRESSION_WINDOW_MS = 450L
+private const val LONG_PRESS_SPEED_UNLOCK_HOLD_MS = 1_000L
 
 internal const val LONG_PRESS_SPEED_LOCK_ZONE_HEIGHT_DP = 96
 internal const val FOREGROUND_SURFACE_RECOVERY_DELAY_MS = 80L
@@ -184,7 +187,7 @@ internal fun resolveLongPressSpeedStartDecision(
             requestedSpeed = requestedSpeed,
             currentAudioQuality = currentAudioQuality
         ),
-        clearExistingLock = longPressSpeedLocked
+        clearExistingLock = false
     )
 }
 
@@ -213,7 +216,35 @@ internal fun shouldEnableViewportTransformGesture(
     return false
 }
 
+fun resolveSystemStreamVolumeFromGesture(
+    startVolumeStep: Int,
+    maxVolumeStep: Int,
+    totalDragDistanceY: Float,
+    screenHeightPx: Float,
+    gestureSensitivity: Float
+): Int {
+    if (maxVolumeStep <= 0 || screenHeightPx <= 0f) return 0
+    val deltaStep = (-totalDragDistanceY / screenHeightPx * maxVolumeStep * gestureSensitivity)
+        .roundToInt()
+    return (startVolumeStep + deltaStep).coerceIn(0, maxVolumeStep)
+}
+
+internal fun shouldTriggerPinchExitFullscreen(
+    isFullscreen: Boolean,
+    isScreenLocked: Boolean,
+    twoFingerSpeedAxisLocked: Boolean,
+    currentViewportScale: Float,
+    cumulativeZoom: Float,
+    minExitZoom: Float = 0.82f
+): Boolean {
+    if (!isFullscreen || isScreenLocked) return false
+    if (twoFingerSpeedAxisLocked) return false
+    if (currentViewportScale > 1.01f) return false
+    return cumulativeZoom < minExitZoom.coerceIn(0.1f, 1.0f)
+}
+
 internal fun shouldLockLongPressSpeedInTargetZone(
+    longPressSpeedLockEnabled: Boolean = true,
     isLongPressing: Boolean,
     alreadyLocked: Boolean,
     currentPointerY: Float,
@@ -222,6 +253,7 @@ internal fun shouldLockLongPressSpeedInTargetZone(
     accumulatedDragYPx: Float = 0f,
     minDragDistancePx: Float = 0f
 ): Boolean {
+    if (!longPressSpeedLockEnabled) return false
     if (!isLongPressing || alreadyLocked) return false
     if (containerHeightPx <= 0f || lockZoneHeightPx <= 0f) return false
     if (abs(accumulatedDragYPx) < minDragDistancePx.coerceAtLeast(0f)) return false
@@ -235,6 +267,23 @@ internal fun shouldConsumeExclusiveLongPressSpeedDrag(
     longPressSpeedLocked: Boolean
 ): Boolean {
     return isLongPressing && !longPressSpeedLocked
+}
+
+internal fun shouldUnlockLockedLongPressSpeedFromRightDownDrag(
+    longPressSpeedLocked: Boolean,
+    isLongPressing: Boolean,
+    startX: Float,
+    startY: Float,
+    currentY: Float,
+    containerWidthPx: Float,
+    holdDurationMs: Long,
+    minDownDragPx: Float,
+    minHoldDurationMs: Long = LONG_PRESS_SPEED_UNLOCK_HOLD_MS
+): Boolean {
+    if (!longPressSpeedLocked || !isLongPressing) return false
+    if (containerWidthPx <= 0f || startX < containerWidthPx * 0.5f) return false
+    if (holdDurationMs < minHoldDurationMs.coerceAtLeast(0L)) return false
+    return currentY - startY >= minDownDragPx.coerceAtLeast(0f)
 }
 
 internal fun shouldReapplyLockedLongPressSpeed(
@@ -330,14 +379,21 @@ internal fun resolveHorizontalSeekDeltaMs(
     totalDragDistanceX: Float,
     containerWidthPx: Float,
     fullscreenSwipeSeekSeconds: Int?,
+    inlineSwipeSeekSeconds: Int,
     gestureSensitivity: Float
 ): Long? {
     if (isFullscreen && fullscreenSwipeSeekEnabled) {
         val seekSeconds = fullscreenSwipeSeekSeconds ?: return null
-        val stepWidthPx = (containerWidthPx / 8f).coerceAtLeast(1f)
-        val stepCount = (totalDragDistanceX / stepWidthPx).toInt()
-        val steppedDelta = stepCount * seekSeconds * 1000L
-        if (steppedDelta != 0L) return steppedDelta
+        val safeWidthPx = containerWidthPx.coerceAtLeast(1f)
+        val maxDeltaMs = seekSeconds.coerceAtLeast(1) * 1000L
+        val rawDeltaMs = (totalDragDistanceX / safeWidthPx * maxDeltaMs * gestureSensitivity).toLong()
+        return rawDeltaMs.coerceIn(-maxDeltaMs, maxDeltaMs)
+    }
+    if (!isFullscreen) {
+        val safeWidthPx = containerWidthPx.coerceAtLeast(1f)
+        val maxDeltaMs = inlineSwipeSeekSeconds.coerceIn(1, 120) * 1000L
+        val rawDeltaMs = (totalDragDistanceX / safeWidthPx * maxDeltaMs * gestureSensitivity).toLong()
+        return rawDeltaMs.coerceIn(-maxDeltaMs, maxDeltaMs)
     }
     return (totalDragDistanceX * 200f * gestureSensitivity).toLong()
 }
@@ -360,7 +416,7 @@ internal fun resolveRelativeSeekTargetPosition(
 internal fun shouldCommitGestureSeek(
     currentPositionMs: Long,
     targetPositionMs: Long,
-    minDeltaMs: Long = 300L
+    minDeltaMs: Long = 800L
 ): Boolean {
     return abs(targetPositionMs - currentPositionMs) >= minDeltaMs
 }
@@ -388,7 +444,28 @@ internal fun shouldTriggerFullscreenBySwipe(
 internal fun shouldAllowPlaybackStateAutoFullscreen(
     smallestScreenWidthDp: Int
 ): Boolean {
-    return smallestScreenWidthDp < 600
+    return smallestScreenWidthDp > 0
+}
+
+internal fun shouldToggleAutoFullscreenForCurrentPlaybackSnapshot(
+    autoEnterFullscreenEnabled: Boolean,
+    autoExitFullscreenEnabled: Boolean,
+    allowPlaybackStateAutoFullscreen: Boolean,
+    playbackState: Int,
+    playWhenReady: Boolean,
+    hasAutoEnteredFullscreen: Boolean,
+    isFullscreen: Boolean
+): Boolean {
+    return shouldToggleAutoFullscreenForPlaybackEvent(
+        autoEnterFullscreenEnabled = autoEnterFullscreenEnabled,
+        autoExitFullscreenEnabled = autoExitFullscreenEnabled,
+        allowPlaybackStateAutoFullscreen = allowPlaybackStateAutoFullscreen,
+        playbackState = playbackState,
+        playWhenReady = playWhenReady,
+        hasAutoEnteredFullscreen = hasAutoEnteredFullscreen,
+        isFullscreen = isFullscreen,
+        previousPlayWhenReady = false
+    )
 }
 
 internal fun shouldToggleAutoFullscreenForPlaybackEvent(
@@ -453,11 +530,16 @@ internal data class GestureLevelOverlayVisualPolicy(
 )
 
 internal data class VideoGestureMotionSpec(
+    val digitInitialBlurRadiusDp: Float,
+    val digitInitialAlpha: Float,
+    val digitBlurHoldDurationMillis: Int,
     val digitBlurResetDurationMillis: Int,
     val digitAlphaResetDurationMillis: Int,
     val digitEnterFadeDurationMillis: Int,
     val digitExitFadeDurationMillis: Int,
     val digitScaleDurationMillis: Int,
+    val digitSlideSpringDampingRatio: Float,
+    val digitSlideSpringStiffness: Float,
     val levelOverlayEnterFadeDurationMillis: Int,
     val levelOverlayEnterTransformDurationMillis: Int,
     val levelOverlayExitDurationMillis: Int,
@@ -477,11 +559,16 @@ internal data class VideoGestureMotionSpec(
 
 internal fun resolveVideoGestureMotionSpec(): VideoGestureMotionSpec {
     return VideoGestureMotionSpec(
-        digitBlurResetDurationMillis = 220,
-        digitAlphaResetDurationMillis = 220,
-        digitEnterFadeDurationMillis = 130,
-        digitExitFadeDurationMillis = 120,
-        digitScaleDurationMillis = 200,
+        digitInitialBlurRadiusDp = GesturePercentMotionDefaults.InitialBlurRadiusDp,
+        digitInitialAlpha = GesturePercentMotionDefaults.InitialAlpha,
+        digitBlurHoldDurationMillis = GesturePercentMotionDefaults.BlurHoldDurationMillis,
+        digitBlurResetDurationMillis = GesturePercentMotionDefaults.BlurResetDurationMillis,
+        digitAlphaResetDurationMillis = GesturePercentMotionDefaults.AlphaResetDurationMillis,
+        digitEnterFadeDurationMillis = GesturePercentMotionDefaults.EnterFadeDurationMillis,
+        digitExitFadeDurationMillis = GesturePercentMotionDefaults.ExitFadeDurationMillis,
+        digitScaleDurationMillis = 0,
+        digitSlideSpringDampingRatio = GesturePercentMotionDefaults.SlideSpringDampingRatio,
+        digitSlideSpringStiffness = GesturePercentMotionDefaults.SlideSpringStiffness,
         levelOverlayEnterFadeDurationMillis = 160,
         levelOverlayEnterTransformDurationMillis = 220,
         levelOverlayExitDurationMillis = 200,
@@ -803,6 +890,14 @@ internal fun shouldEnableForcedReturnCoverSharedBounds(
     sourceRoute: String?
 ): Boolean {
     val sourceRouteBase = sourceRoute?.substringBefore("?")
+    // Home 源返回时：详情↔首页卡片的整体 shell sharedBounds（[videoCardShellSharedElementKey]）
+    // 已经完整接管 morph。此处再额外挂一层封面 sharedBounds（[videoCoverSharedElementKey]）
+    // 会和 shell 错位——首页卡片侧并没有匹配 cover key 的对端（GlassVideoCard 完全没挂；
+    // VideoCard 仅在 `!useCardShellSharedBounds` 时挂，对 home 源永远 false），单边 morph + spring
+    // 终态过冲就是用户感知到的"封面回弹"。直接撤掉，让封面跟随 shell 一起被裁剪/缩放即可。
+    if (sourceRouteBase == com.android.purebilibili.navigation.ScreenRoutes.Home.route) {
+        return false
+    }
     val allowBySourceRoute = sourceRouteBase == null ||
         com.android.purebilibili.navigation.isVideoCardReturnTargetRoute(sourceRouteBase)
     return forceCoverDuringReturnAnimation &&
@@ -810,6 +905,15 @@ internal fun shouldEnableForcedReturnCoverSharedBounds(
         hasSharedTransitionScope &&
         hasAnimatedVisibilityScope &&
         allowBySourceRoute
+}
+
+internal fun resolveForcedReturnCoverSharedElementSourceRoute(sourceRoute: String?): String? {
+    val sourceRouteBase = sourceRoute?.substringBefore("?")
+    return if (sourceRouteBase == com.android.purebilibili.navigation.ScreenRoutes.Home.route) {
+        sourceRouteBase
+    } else {
+        null
+    }
 }
 
 internal fun shouldUseReturnLandingMotionForForcedReturnCover(

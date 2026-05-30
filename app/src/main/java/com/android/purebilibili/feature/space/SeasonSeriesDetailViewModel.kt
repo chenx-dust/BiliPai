@@ -21,6 +21,9 @@ class SeasonSeriesDetailViewModel(application: Application) : BaseListViewModel(
     private var ownerName: String = ""
     private var pageTitle: String = ""
 
+    val isFavoriteDetail: Boolean
+        get() = type == SpaceCollectionDetailType.FAVORITE.raw
+
     // Pagination
     private var currentPage = 1
     private var hasMore = true
@@ -143,7 +146,12 @@ class SeasonSeriesDetailViewModel(application: Application) : BaseListViewModel(
             )
             mediaItems
                 .orEmpty()
-                .map { it.toVideoItem() }
+                .map {
+                    it.toVideoItem(
+                        ownerFallbackMid = mid,
+                        ownerFallbackName = ownerName
+                    )
+                }
         } catch (e: Exception) {
             e.printStackTrace()
             emptyList()
@@ -178,7 +186,12 @@ class SeasonSeriesDetailViewModel(application: Application) : BaseListViewModel(
                     hasMore = response?.has_more == true
                     _hasMoreState.value = hasMore
                     val mediaItems = response?.medias.orEmpty()
-                    newItems = mediaItems.map { it.toVideoItem() }
+                    newItems = mediaItems.map {
+                        it.toVideoItem(
+                            ownerFallbackMid = mid,
+                            ownerFallbackName = ownerName
+                        )
+                    }
                     val currentLoadedCount = _uiState.value.items.size + newItems.size
                     _favoriteDetailProgressState.value = _favoriteDetailProgressState.value.copy(
                         loadedCount = currentLoadedCount,
@@ -212,5 +225,9 @@ class SeasonSeriesDetailViewModel(application: Application) : BaseListViewModel(
                  _isLoadingMoreState.value = false
             }
         }
+    }
+
+    init {
+        loadData()
     }
 }

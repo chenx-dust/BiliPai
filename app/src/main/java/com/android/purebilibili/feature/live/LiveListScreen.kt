@@ -121,16 +121,15 @@ class LiveListViewModel(application: Application) : AndroidViewModel(application
 
     private suspend fun loadRecommendLive() {
         try {
-            val response = NetworkModule.api.getLiveList(parentAreaId = 0, page = 1, pageSize = 30)
-            if (response.code == 0 && response.data != null) {
-                val items = response.data.getAllRooms().map { room ->
+            LiveRepository.getRecommendedLiveRooms().onSuccess { rooms ->
+                val items = rooms.map { room ->
                     LiveRoomItem(
                         roomId = room.roomid,
                         title = room.title,
                         cover = room.displayCover(),
                         uname = room.uname,
                         face = room.face,
-                        online = room.online,
+                        online = room.viewerCount(),
                         areaName = room.areaName
                     )
                 }
@@ -163,7 +162,7 @@ class LiveListViewModel(application: Application) : AndroidViewModel(application
                             cover = room.displayCover(),
                             uname = room.uname,
                             face = room.face,
-                            online = room.online,
+                            online = room.viewerCount(),
                             areaName = room.areaName,
                             liveStatus = 1
                         )
@@ -199,7 +198,7 @@ class LiveListViewModel(application: Application) : AndroidViewModel(application
                             cover = room.displayCover(),
                             uname = room.uname,
                             face = room.face,
-                            online = room.online,
+                            online = room.viewerCount(),
                             areaName = room.areaName
                         )
                     }
@@ -849,7 +848,7 @@ private fun LiveRoomCard(
                         if (sharedTransitionScope != null && animatedVisibilityScope != null) {
                             with(sharedTransitionScope) {
                                 Modifier.sharedElement(
-                                    sharedContentState = rememberSharedContentState(key = "live_cover_${item.roomId}"),
+                                    sharedContentState = rememberSharedContentState(key = com.android.purebilibili.core.ui.transition.liveCoverSharedElementKey(item.roomId)),
                                     animatedVisibilityScope = animatedVisibilityScope
                                 )
                             }

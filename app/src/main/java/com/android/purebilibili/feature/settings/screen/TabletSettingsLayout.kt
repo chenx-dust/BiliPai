@@ -1,5 +1,7 @@
 package com.android.purebilibili.feature.settings
 
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
@@ -30,37 +32,19 @@ import androidx.compose.ui.unit.dp
 import com.android.purebilibili.R
 import com.android.purebilibili.core.store.SettingsManager
 import com.android.purebilibili.core.ui.AdaptiveSplitLayout
+import com.android.purebilibili.core.ui.AppSurfaceTokens
 import com.android.purebilibili.core.ui.globalWallpaperAwareBackground
 import com.android.purebilibili.core.ui.rememberAppBackIcon
-import com.android.purebilibili.core.ui.rememberAppCollectionIcon
-import com.android.purebilibili.core.ui.rememberAppInfoIcon
-import com.android.purebilibili.core.ui.rememberAppLockIcon
 import com.android.purebilibili.core.ui.rememberAppSettingsIcon
 import dev.chrisbanes.haze.HazeState
-import com.android.purebilibili.core.theme.iOSBlue
-import com.android.purebilibili.core.theme.iOSGreen
-import com.android.purebilibili.core.theme.iOSOrange
-import com.android.purebilibili.core.theme.iOSPink
-import com.android.purebilibili.core.theme.iOSPurple
-import com.android.purebilibili.core.theme.iOSTeal
 import kotlinx.coroutines.launch
-
-enum class SettingsCategory(
-    val titleResId: Int,
-    val color: Color
-) {
-    GENERAL(R.string.settings_section_general, iOSPink),
-    PRIVACY(R.string.settings_section_privacy, iOSPurple),
-    STORAGE(R.string.settings_section_storage, iOSBlue),
-    DEVELOPER(R.string.settings_section_developer, iOSTeal),
-    ABOUT(R.string.settings_section_about, iOSOrange)
-}
 
 @Composable
 fun TabletSettingsLayout(
     // Callbacks
     onBack: () -> Unit,
     onAppearanceClick: () -> Unit,
+    onAnimationClick: () -> Unit,
     onPlaybackClick: () -> Unit,
     onPermissionClick: () -> Unit,
     onPluginsClick: () -> Unit,
@@ -80,6 +64,7 @@ fun TabletSettingsLayout(
     onSettingsShareClick: () -> Unit,
     onWebDavBackupClick: () -> Unit,
     onDownloadPathClick: () -> Unit,
+    onImageSavePathClick: () -> Unit,
     onClearCacheClick: () -> Unit,
     onDonateClick: () -> Unit,
     onTipsClick: () -> Unit, // [Feature]
@@ -92,6 +77,7 @@ fun TabletSettingsLayout(
     
     // Logic Callbacks
     onPrivacyModeChange: (Boolean) -> Unit,
+    onPrivacyContentAuthenticationChange: (Boolean) -> Unit,
     onCrashTrackingChange: (Boolean) -> Unit,
     onAnalyticsChange: (Boolean) -> Unit,
     onEasterEggChange: (Boolean) -> Unit,
@@ -99,7 +85,9 @@ fun TabletSettingsLayout(
     
     // State
     privacyModeEnabled: Boolean,
+    privacyContentAuthenticationEnabled: Boolean,
     customDownloadPath: String?,
+    customImageSavePath: String?,
     cacheSize: String,
     crashTrackingEnabled: Boolean,
     analyticsEnabled: Boolean,
@@ -122,6 +110,8 @@ fun TabletSettingsLayout(
     onFeedApiTypeChange: (SettingsManager.FeedApiType) -> Unit,
     incrementalTimelineRefreshEnabled: Boolean,
     onIncrementalTimelineRefreshChange: (Boolean) -> Unit,
+    dynamicImagePreviewTextVisible: Boolean,
+    onDynamicImagePreviewTextVisibleChange: (Boolean) -> Unit,
     dynamicVisibleTabIds: Set<String>,
     onDynamicTabVisibilityChange: (String) -> Unit,
     homeRefreshCount: Int,
@@ -129,7 +119,7 @@ fun TabletSettingsLayout(
     
     modifier: Modifier = Modifier
 ) {
-    var selectedCategory by remember { mutableStateOf(SettingsCategory.GENERAL) }
+    var selectedCategory by remember { mutableStateOf(SettingsRootCategory.INTERFACE_THEME) }
     val coroutineScope = rememberCoroutineScope()
     var pendingLanguageRestart by remember { mutableStateOf<AppLanguage?>(null) }
     val uiPreset = com.android.purebilibili.core.theme.LocalUiPreset.current
@@ -156,11 +146,78 @@ fun TabletSettingsLayout(
     val viewModel: SettingsViewModel = androidx.lifecycle.viewmodel.compose.viewModel()
     val context = androidx.compose.ui.platform.LocalContext.current
     val state by viewModel.state.collectAsState()
-    val generalIcon = rememberAppSettingsIcon()
-    val privacyIcon = rememberAppLockIcon()
-    val storageIcon = rememberAppCollectionIcon()
-    val developerIcon = rememberSettingsEntryVisual(SettingsSearchTarget.PLUGINS, uiPreset).icon
-    val aboutIcon = rememberAppInfoIcon()
+    val fallbackCategoryIcon = rememberAppSettingsIcon()
+    val categoryOrder = remember { resolveTabletSettingsRootCategoryOrder() }
+    val rootCategoryActions = SettingsRootCategoryActions(
+        onAppearanceClick = { activeDetail = SettingsDetail.APPEARANCE },
+        onAnimationClick = { activeDetail = SettingsDetail.ANIMATION },
+        onPlaybackClick = { activeDetail = SettingsDetail.PLAYBACK },
+        onBottomBarClick = { activeDetail = SettingsDetail.BOTTOM_BAR },
+        onPermissionClick = { activeDetail = SettingsDetail.PERMISSION },
+        onBlockedListClick = { activeDetail = SettingsDetail.BLOCKED_LIST },
+        onPluginsClick = { activeDetail = SettingsDetail.PLUGINS },
+        onExportLogsClick = onExportLogsClick,
+        onSettingsShareClick = onSettingsShareClick,
+        onWebDavBackupClick = onWebDavBackupClick,
+        onDownloadPathClick = onDownloadPathClick,
+        onImageSavePathClick = onImageSavePathClick,
+        onClearCacheClick = onClearCacheClick,
+        onGithubClick = onGithubClick,
+        onTelegramClick = onTelegramClick,
+        onTwitterClick = onTwitterClick,
+        onDonateClick = onDonateClick,
+        onDisclaimerClick = onDisclaimerClick,
+        onLicenseClick = onLicenseClick,
+        onVerificationClick = onVerificationClick,
+        onBuildSourceClick = onBuildSourceClick,
+        onBuildFingerprintClick = onBuildFingerprintClick,
+        onCheckUpdateClick = onCheckUpdateClick,
+        onViewReleaseNotesClick = onViewReleaseNotesClick,
+        onVersionClick = onVersionClick,
+        onReplayOnboardingClick = onReplayOnboardingClick,
+        onTipsClick = onTipsClick,
+        onOpenLinksClick = onOpenLinksClick,
+        onPrivacyModeChange = onPrivacyModeChange,
+        onPrivacyContentAuthenticationChange = onPrivacyContentAuthenticationChange,
+        onCrashTrackingChange = onCrashTrackingChange,
+        onAnalyticsChange = onAnalyticsChange,
+        onEasterEggChange = onEasterEggChange,
+        onAutoCheckUpdateChange = onAutoCheckUpdateChange,
+        onFeedApiTypeChange = onFeedApiTypeChange,
+        onIncrementalTimelineRefreshChange = onIncrementalTimelineRefreshChange,
+        onDynamicImagePreviewTextVisibleChange = onDynamicImagePreviewTextVisibleChange,
+        onDynamicTabVisibilityChange = onDynamicTabVisibilityChange,
+        onHomeRefreshCountChange = onHomeRefreshCountChange
+    )
+    val rootCategoryState = SettingsRootCategoryState(
+        privacyModeEnabled = privacyModeEnabled,
+        privacyContentAuthenticationEnabled = privacyContentAuthenticationEnabled,
+        crashTrackingEnabled = crashTrackingEnabled,
+        analyticsEnabled = analyticsEnabled,
+        pluginCount = pluginCount,
+        customDownloadPath = customDownloadPath,
+        customImageSavePath = customImageSavePath,
+        cacheSize = cacheSize,
+        versionName = versionName,
+        easterEggEnabled = easterEggEnabled,
+        updateStatusText = updateStatusText,
+        isCheckingUpdate = isCheckingUpdate,
+        autoCheckUpdateEnabled = autoCheckUpdateEnabled,
+        verificationLabel = verificationLabel,
+        verificationSubtitle = verificationSubtitle,
+        buildSourceValue = buildSourceValue,
+        buildSourceSubtitle = buildSourceSubtitle,
+        buildFingerprintValue = buildFingerprintValue,
+        buildFingerprintCopyValue = buildFingerprintCopyValue,
+        buildFingerprintSubtitle = buildFingerprintSubtitle,
+        versionClickCount = versionClickCount,
+        versionClickThreshold = versionClickThreshold,
+        feedApiType = feedApiType,
+        incrementalTimelineRefreshEnabled = incrementalTimelineRefreshEnabled,
+        dynamicImagePreviewTextVisible = dynamicImagePreviewTextVisible,
+        dynamicVisibleTabIds = dynamicVisibleTabIds,
+        homeRefreshCount = homeRefreshCount
+    )
 
     AdaptiveSplitLayout(
         modifier = modifier,
@@ -170,7 +227,7 @@ fun TabletSettingsLayout(
             Column(
                 modifier = Modifier
                     .fillMaxSize()
-                    .background(MaterialTheme.colorScheme.surface)
+                    .background(AppSurfaceTokens.cardContainer())
                     .padding(horizontal = layoutPolicy.masterPanePaddingDp.dp)
                     .statusBarsPadding()
             ) {
@@ -206,17 +263,12 @@ fun TabletSettingsLayout(
                     onQueryChange = onSearchQueryChange
                 )
 
-                SettingsCategory.entries.forEach { category ->
+                categoryOrder.forEach { category ->
                     val isSelected = category == selectedCategory
-                    val categoryIcon = when (category) {
-                        SettingsCategory.GENERAL -> generalIcon
-                        SettingsCategory.PRIVACY -> privacyIcon
-                        SettingsCategory.STORAGE -> storageIcon
-                        SettingsCategory.DEVELOPER -> developerIcon ?: generalIcon
-                        SettingsCategory.ABOUT -> aboutIcon
-                    }
+                    val categoryVisual = rememberSettingsEntryVisual(category.searchTarget, uiPreset)
+                    val categoryIcon = categoryVisual.icon ?: fallbackCategoryIcon
                     NavigationDrawerItem(
-                        label = { Text(stringResource(category.titleResId)) },
+                        label = { Text(category.title) },
                         selected = isSelected,
                         onClick = { 
                             selectedCategory = category 
@@ -226,7 +278,11 @@ fun TabletSettingsLayout(
                             Icon(
                                 categoryIcon,
                                 contentDescription = null,
-                                tint = if (isSelected) MaterialTheme.colorScheme.onSecondaryContainer else category.color
+                                tint = if (isSelected) {
+                                    MaterialTheme.colorScheme.onSecondaryContainer
+                                } else {
+                                    categoryVisual.iconTint
+                                }
                             ) 
                         },
                         modifier = Modifier
@@ -265,7 +321,28 @@ fun TabletSettingsLayout(
                     ) {
                         SettingsSearchResultsSection(
                             results = searchResults,
-                            onResultClick = { target ->
+                            onResultClick = resultClick@{ target ->
+                                resolveSettingsSceneDetailFocus(target.target)?.let { detailFocus ->
+                                    resolveSettingsRootCategoryForSearchTarget(target.target)?.let { category ->
+                                        selectedCategory = category
+                                    }
+                                    activeDetail = when (detailFocus.target) {
+                                        SettingsSearchTarget.APPEARANCE -> SettingsDetail.APPEARANCE
+                                        SettingsSearchTarget.ANIMATION -> SettingsDetail.ANIMATION
+                                        SettingsSearchTarget.PLAYBACK -> SettingsDetail.PLAYBACK
+                                        SettingsSearchTarget.BOTTOM_BAR -> SettingsDetail.BOTTOM_BAR
+                                        else -> null
+                                    }
+                                    SettingsSearchFocusController.submit(detailFocus.target, detailFocus.focusId)
+                                    onSearchQueryChange("")
+                                    return@resultClick
+                                }
+                                if (isSceneSettingsSearchTarget(target.target)) {
+                                    resolveSettingsRootCategoryForSearchTarget(target.target)?.let { category ->
+                                        selectedCategory = category
+                                        activeDetail = null
+                                    }
+                                }
                                 activeDetail = null
                                 onSearchResultClick(target)
                             }
@@ -345,13 +422,96 @@ fun TabletSettingsLayout(
                             SettingsDetail.BLOCKED_LIST -> {
                                 // [New] Blocked List Content for Tablet
                                 val repository = remember { com.android.purebilibili.data.repository.BlockedUpRepository(context) }
+                                val fileService = remember { BlockedListFileService(context.applicationContext) }
+                                val syncRepository = remember { com.android.purebilibili.data.repository.BilibiliBlockedListSyncRepository(repository) }
                                 val blockedUps by repository.getAllBlockedUps().collectAsState(initial = emptyList())
+                                val latestBlockedUps by rememberUpdatedState(blockedUps)
                                 // Pass scope for unblocking
                                 val scope = rememberCoroutineScope()
+                                var syncingBlockedList by remember { mutableStateOf(false) }
+                                var refreshingProfiles by remember { mutableStateOf(false) }
+                                var blockedListSyncMessage by remember { mutableStateOf<String?>(null) }
+                                val exportJsonLauncher = rememberLauncherForActivityResult(
+                                    contract = ActivityResultContracts.CreateDocument("application/json")
+                                ) { uri ->
+                                    if (uri != null) {
+                                        scope.launch {
+                                            blockedListSyncMessage = "正在导出黑名单 JSON..."
+                                            blockedListSyncMessage = fileService.exportJsonToUri(uri, latestBlockedUps).fold(
+                                                onSuccess = { "已导出 ${latestBlockedUps.size} 个黑名单用户到 JSON 文件" },
+                                                onFailure = { it.message ?: "导出黑名单 JSON 失败" }
+                                            )
+                                        }
+                                    }
+                                }
+                                val importJsonLauncher = rememberLauncherForActivityResult(
+                                    contract = ActivityResultContracts.OpenDocument()
+                                ) { uri ->
+                                    if (uri != null) {
+                                        scope.launch {
+                                            blockedListSyncMessage = "正在导入黑名单 JSON..."
+                                            val text = fileService.readImportText(uri).getOrElse {
+                                                blockedListSyncMessage = it.message ?: "读取黑名单 JSON 失败"
+                                                return@launch
+                                            }
+                                            val items = com.android.purebilibili.data.repository.parseBlockedUpShareText(text)
+                                            blockedListSyncMessage = repository.importBlockedUps(items).message
+                                        }
+                                    }
+                                }
                                 BlockedListContent(
                                     blockedUps = blockedUps,
+                                    syncingBlockedList = syncingBlockedList,
+                                    refreshingProfiles = refreshingProfiles,
+                                    blockedListSyncMessage = blockedListSyncMessage,
+                                    onSyncBlockedList = {
+                                        if (!syncingBlockedList) {
+                                            scope.launch {
+                                                syncingBlockedList = true
+                                                blockedListSyncMessage = "正在同步 B站黑名单..."
+                                                val result = syncRepository.importFromBilibili()
+                                                blockedListSyncMessage = result.fold(
+                                                    onSuccess = { it.message },
+                                                    onFailure = { it.message ?: "同步 B站黑名单失败" }
+                                                )
+                                                syncingBlockedList = false
+                                            }
+                                        }
+                                    },
+                                    onRefreshProfiles = {
+                                        if (!refreshingProfiles) {
+                                            scope.launch {
+                                                refreshingProfiles = true
+                                                blockedListSyncMessage = "正在刷新黑名单用户资料..."
+                                                blockedListSyncMessage = repository.refreshBlockedUpProfiles().message
+                                                refreshingProfiles = false
+                                            }
+                                        }
+                                    },
+                                    onShareBlockedList = {
+                                        com.android.purebilibili.core.util.ShareUtils.shareText(
+                                            context = context,
+                                            subject = "BiliPai 黑名单",
+                                            text = com.android.purebilibili.data.repository.buildBlockedUpShareText(blockedUps),
+                                            chooserTitle = "分享黑名单"
+                                        )
+                                    },
+                                    onExportBlockedListJson = {
+                                        exportJsonLauncher.launch(buildBlockedListJsonFileName())
+                                    },
+                                    onImportBlockedListJsonRequest = {
+                                        importJsonLauncher.launch(arrayOf("application/json", "text/plain", "text/*", "application/octet-stream"))
+                                    },
+                                    onImportBlockedList = { text ->
+                                        scope.launch {
+                                            val items = com.android.purebilibili.data.repository.parseBlockedUpShareText(text)
+                                            blockedListSyncMessage = repository.importBlockedUps(items).message
+                                        }
+                                    },
                                     onUnblock = { mid ->
-                                        scope.launch { repository.unblockUp(mid) }
+                                        scope.launch {
+                                            blockedListSyncMessage = repository.unblockUpWithBilibiliSync(mid).message
+                                        }
                                     },
                                     modifier = Modifier.fillMaxSize()
                                 )
@@ -440,7 +600,7 @@ fun TabletSettingsLayout(
                             .verticalScroll(rememberScrollState())
                         ) {
                             Text(
-                                text = stringResource(category.titleResId),
+                                text = category.title,
                                 style = MaterialTheme.typography.titleLarge,
                                 fontWeight = FontWeight.Bold,
                                 modifier = Modifier
@@ -449,98 +609,11 @@ fun TabletSettingsLayout(
                                     .statusBarsPadding()
                             )
                             
-                            when (category) {
-                                SettingsCategory.GENERAL -> {
-                                    GeneralSection(
-                                        onAppearanceClick = { activeDetail = SettingsDetail.APPEARANCE },
-                                        onPlaybackClick = { activeDetail = SettingsDetail.PLAYBACK },
-                                        onBottomBarClick = { activeDetail = SettingsDetail.BOTTOM_BAR }
-                                    )
-                                }
-                                SettingsCategory.PRIVACY -> PrivacySection(
-                                    privacyModeEnabled = privacyModeEnabled,
-                                    onPrivacyModeChange = onPrivacyModeChange,
-                                    onPermissionClick = { activeDetail = SettingsDetail.PERMISSION },
-                                    onBlockedListClick = { activeDetail = SettingsDetail.BLOCKED_LIST } // [New]
-                                )
-                                SettingsCategory.STORAGE -> {
-                                    FeedApiSection(
-                                        feedApiType = feedApiType,
-                                        onFeedApiTypeChange = onFeedApiTypeChange,
-                                        incrementalTimelineRefreshEnabled = incrementalTimelineRefreshEnabled,
-                                        onIncrementalTimelineRefreshChange = onIncrementalTimelineRefreshChange,
-                                        dynamicVisibleTabIds = dynamicVisibleTabIds,
-                                        onDynamicTabVisibilityChange = onDynamicTabVisibilityChange,
-                                        homeRefreshCount = homeRefreshCount,
-                                        onHomeRefreshCountChange = onHomeRefreshCountChange
-                                    )
-                                    Spacer(modifier = Modifier.height(12.dp))
-                                    DataStorageSection(
-                                        customDownloadPath = customDownloadPath,
-                                        cacheSize = cacheSize,
-                                        onSettingsShareClick = onSettingsShareClick,
-                                        onWebDavBackupClick = onWebDavBackupClick,
-                                        onDownloadPathClick = onDownloadPathClick,
-                                        onClearCacheClick = onClearCacheClick
-                                    )
-                                }
-                                SettingsCategory.DEVELOPER -> DeveloperSection(
-                                    crashTrackingEnabled = crashTrackingEnabled,
-                                    analyticsEnabled = analyticsEnabled,
-                                    pluginCount = pluginCount,
-                                    onCrashTrackingChange = onCrashTrackingChange,
-                                    onAnalyticsChange = onAnalyticsChange,
-                                    onPluginsClick = { activeDetail = SettingsDetail.PLUGINS },
-                                    onExportLogsClick = onExportLogsClick
-                                )
-                                SettingsCategory.ABOUT -> {
-                                    ReleaseChannelPinnedCard(
-                                        onGithubClick = onGithubClick,
-                                        onTelegramClick = onTelegramClick,
-                                        onDisclaimerClick = onDisclaimerClick
-                                    )
-                                    Spacer(modifier = Modifier.height(12.dp))
-                                    FollowAuthorSection(
-                                        onTelegramClick = onTelegramClick,
-                                        onTwitterClick = onTwitterClick,
-                                        onDonateClick = onDonateClick
-                                    )
-                                    Spacer(modifier = Modifier.height(12.dp))
-                                    AboutSection(
-                                        versionName = versionName,
-                                        easterEggEnabled = easterEggEnabled,
-                                        onDisclaimerClick = onDisclaimerClick,
-                                        onLicenseClick = onLicenseClick,
-                                        onGithubClick = onGithubClick,
-                                        onVerificationClick = onVerificationClick,
-                                        onBuildSourceClick = onBuildSourceClick,
-                                        onBuildFingerprintClick = onBuildFingerprintClick,
-                                        onCheckUpdateClick = onCheckUpdateClick,
-                                        onViewReleaseNotesClick = onViewReleaseNotesClick,
-                                        autoCheckUpdateEnabled = autoCheckUpdateEnabled,
-                                        onAutoCheckUpdateChange = onAutoCheckUpdateChange,
-                                        onVersionClick = onVersionClick,
-                                        onReplayOnboardingClick = onReplayOnboardingClick,
-                                        onEasterEggChange = onEasterEggChange,
-                                        updateStatusText = updateStatusText,
-                                        isCheckingUpdate = isCheckingUpdate,
-                                        verificationLabel = verificationLabel,
-                                        verificationSubtitle = verificationSubtitle,
-                                        buildSourceValue = buildSourceValue,
-                                        buildSourceSubtitle = buildSourceSubtitle,
-                                        buildFingerprintValue = buildFingerprintValue,
-                                        buildFingerprintCopyValue = buildFingerprintCopyValue,
-                                        buildFingerprintSubtitle = buildFingerprintSubtitle,
-                                        versionClickCount = versionClickCount,
-                                        versionClickThreshold = versionClickThreshold
-                                    )
-                                    Spacer(modifier = Modifier.height(12.dp))
-                                    SupportToolsSection(
-                                        onTipsClick = onTipsClick,
-                                        onOpenLinksClick = onOpenLinksClick
-                                    )
-                                }
-                            }
+                            SettingsRootCategoryContent(
+                                category = category,
+                                actions = rootCategoryActions,
+                                state = rootCategoryState
+                            )
                             Spacer(modifier = Modifier
                                 .windowInsetsBottomHeight(WindowInsets.navigationBars)
                             )

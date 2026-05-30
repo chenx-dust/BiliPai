@@ -264,11 +264,14 @@ fun DanmakuSettingsPanel(
     staticDanmakuToScroll: Boolean = false,
     massiveMode: Boolean = false,
     mergeDuplicates: Boolean = true,
+    duplicateMergeWindowMs: Int = 500,
+    duplicateMergeCountThreshold: Int = 2,
     allowScroll: Boolean = true,
     allowTop: Boolean = true,
     allowBottom: Boolean = true,
     allowColorful: Boolean = true,
     allowSpecial: Boolean = true,
+    hideInteractiveCommands: Boolean = false,
     showBlockRuleEditor: Boolean = false,
     showSmartOcclusionSection: Boolean = false,
     showSyncSection: Boolean = false,
@@ -289,11 +292,14 @@ fun DanmakuSettingsPanel(
     onStaticDanmakuToScrollChange: (Boolean) -> Unit = {},
     onMassiveModeChange: (Boolean) -> Unit = {},
     onMergeDuplicatesChange: (Boolean) -> Unit = {},
+    onDuplicateMergeWindowMsChange: (Int) -> Unit = {},
+    onDuplicateMergeCountThresholdChange: (Int) -> Unit = {},
     onAllowScrollChange: (Boolean) -> Unit = {},
     onAllowTopChange: (Boolean) -> Unit = {},
     onAllowBottomChange: (Boolean) -> Unit = {},
     onAllowColorfulChange: (Boolean) -> Unit = {},
     onAllowSpecialChange: (Boolean) -> Unit = {},
+    onHideInteractiveCommandsChange: (Boolean) -> Unit = {},
     onBlockRulesRawChange: (String) -> Unit = {},
     onSmartOcclusionChange: (Boolean) -> Unit = {},
     onFullscreenWidthModeChange: (DanmakuPanelWidthMode) -> Unit = {},
@@ -795,6 +801,47 @@ fun DanmakuSettingsPanel(
                             )
                         }
                     }
+
+                    if (mergeDuplicates) {
+                        Spacer(modifier = Modifier.height(12.dp))
+                        Surface(
+                            modifier = Modifier.fillMaxWidth(),
+                            color = panelColors.itemColor,
+                            shape = RoundedCornerShape(16.dp)
+                        ) {
+                            Column(modifier = Modifier.padding(16.dp)) {
+                                DanmakuSliderItem(
+                                    label = "合并窗口",
+                                    value = duplicateMergeWindowMs.toFloat(),
+                                    valueRange = 100f..3000f,
+                                    steps = 28,
+                                    displayValue = { "${it.roundToInt()}ms" },
+                                    onValueChange = { onDuplicateMergeWindowMsChange(it.roundToInt()) },
+                                    colors = panelColors,
+                                    fullscreenStyle = isFullscreenStyle,
+                                    resetValue = 500f,
+                                    tickCount = 6
+                                )
+
+                                Spacer(modifier = Modifier.height(14.dp))
+
+                                DanmakuSliderItem(
+                                    label = "计数阈值",
+                                    value = duplicateMergeCountThreshold.toFloat(),
+                                    valueRange = 2f..10f,
+                                    steps = 7,
+                                    displayValue = { "${it.roundToInt()} 条" },
+                                    onValueChange = {
+                                        onDuplicateMergeCountThresholdChange(it.roundToInt())
+                                    },
+                                    colors = panelColors,
+                                    fullscreenStyle = isFullscreenStyle,
+                                    resetValue = 2f,
+                                    tickCount = 5
+                                )
+                            }
+                        }
+                    }
     
                     Spacer(modifier = Modifier.height(16.dp))
 
@@ -895,6 +942,13 @@ fun DanmakuSettingsPanel(
                                 label = "高级弹幕",
                                 checked = allowSpecial,
                                 onCheckedChange = onAllowSpecialChange,
+                                colors = panelColors,
+                                fullscreenStyle = isFullscreenStyle
+                            )
+                            DanmakuFilterSwitchRow(
+                                label = "视频内互动提示",
+                                checked = !hideInteractiveCommands,
+                                onCheckedChange = { onHideInteractiveCommandsChange(!it) },
                                 showDivider = false,
                                 colors = panelColors,
                                 fullscreenStyle = isFullscreenStyle
@@ -954,7 +1008,7 @@ fun DanmakuSettingsPanel(
                                     text = if (totalBlockRuleCount > 0) {
                                         "已维护 $totalBlockRuleCount 条规则，修改后立即生效"
                                     } else {
-                                        "每行一个，支持关键词、正则与 UID(hash)：regex:xxx / re:xxx / /xxx/ / uid:xxx"
+                                        "每行一个，也可粘贴 JSON：keywords / regex / userHashes"
                                     },
                                     color = panelColors.supportingColor,
                                     fontSize = 11.sp

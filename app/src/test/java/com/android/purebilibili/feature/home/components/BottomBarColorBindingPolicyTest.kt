@@ -79,7 +79,6 @@ class BottomBarColorBindingPolicyTest {
             "Person",
             "Star",
             "Video",
-            "Bookmark",
             "Gearshape"
         )
 
@@ -88,6 +87,24 @@ class BottomBarColorBindingPolicyTest {
                 source.contains("{ Icon(CupertinoIcons.Filled.$symbol, contentDescription = null) }")
             },
             "Bottom bar selected icons should use filled symbols so the whole selected icon is tinted by the theme color."
+        )
+    }
+
+    @Test
+    fun `watch later bottom bar icons use clock semantics`() {
+        val source = File("src/main/java/com/android/purebilibili/feature/home/components/BottomBar.kt")
+            .readText()
+        val watchLaterBlock = source
+            .substringAfter("WATCHLATER(")
+            .substringBefore("    ),")
+
+        assertTrue(watchLaterBlock.contains("CupertinoIcons.Filled.Clock"))
+        assertTrue(watchLaterBlock.contains("CupertinoIcons.Outlined.Clock"))
+        assertFalse(watchLaterBlock.contains("Bookmark"))
+        assertTrue(
+            source.contains(
+                "BottomNavItem.WATCHLATER -> if (selected) Icons.Filled.WatchLater else Icons.Outlined.WatchLater"
+            )
         )
     }
 
@@ -104,6 +121,45 @@ class BottomBarColorBindingPolicyTest {
         assertTrue(
             visual.useSelectedIcon,
             "Item directly covered by the moving indicator should use the filled icon so theme color fills the symbol during drag."
+        )
+    }
+
+    @Test
+    fun `tap target does not jump to selected color before indicator arrives`() {
+        val homeCoverage = resolveBottomBarItemCoverage(
+            itemIndex = 0,
+            indicatorPosition = 0f,
+            currentSelectedIndex = 1,
+            motionProgress = 0f
+        )
+        val tappedTargetCoverage = resolveBottomBarItemCoverage(
+            itemIndex = 1,
+            indicatorPosition = 0f,
+            currentSelectedIndex = 1,
+            motionProgress = 0f
+        )
+        val targetMidCoverage = resolveBottomBarItemCoverage(
+            itemIndex = 1,
+            indicatorPosition = 0.42f,
+            currentSelectedIndex = 1,
+            motionProgress = 0f
+        )
+
+        assertEquals(
+            1f,
+            homeCoverage,
+            "The visual state should stay on the indicator origin when navigation state has already switched."
+        )
+        assertEquals(
+            0f,
+            tappedTargetCoverage,
+            "The tapped page must not become fully selected until the indicator reaches it."
+        )
+        assertEquals(
+            0.42f,
+            targetMidCoverage,
+            0.001f,
+            "The tapped page should gain color only according to indicator coverage."
         )
     }
 

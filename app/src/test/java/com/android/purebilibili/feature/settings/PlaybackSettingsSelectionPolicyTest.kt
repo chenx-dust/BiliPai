@@ -13,6 +13,78 @@ import org.junit.Test
 class PlaybackSettingsSelectionPolicyTest {
 
     @Test
+    fun `playback interaction and fullscreen blocks should be split into scene composables`() {
+        val source = loadSource(
+            "app/src/main/java/com/android/purebilibili/feature/settings/screen/PlaybackSettingsScreen.kt"
+        )
+
+        assertTrue(source.contains("private fun PlaybackInteractionSettingsSection("))
+        assertTrue(source.contains("private fun PlaybackFullscreenGestureSettingsSection("))
+        val contentBlock = source
+            .substringAfter("fun PlaybackSettingsContent(")
+            .substringBefore("private fun PlaybackInteractionSettingsSection(")
+        assertTrue(contentBlock.contains("IOSSectionTitle(\"互动与评论\")"))
+        assertTrue(contentBlock.contains("IOSSectionTitle(\"全屏与手势\")"))
+        assertTrue(contentBlock.contains("PlaybackInteractionSettingsSection("))
+        assertTrue(contentBlock.contains("PlaybackFullscreenGestureSettingsSection("))
+    }
+
+    @Test
+    fun `comment controls should stay in interaction section instead of fullscreen gesture section`() {
+        val source = loadSource(
+            "app/src/main/java/com/android/purebilibili/feature/settings/screen/PlaybackSettingsScreen.kt"
+        )
+
+        val interactionBlock = source
+            .substringAfter("private fun PlaybackInteractionSettingsSection(")
+            .substringBefore("PlaybackFullscreenGestureSettingsSection(")
+        val fullscreenBlock = source
+            .substringAfter("private fun PlaybackFullscreenGestureSettingsSection(")
+
+        listOf("评论回复预览", "评论发送检测", "评论区个性装扮", "图片长按保存").forEach { title ->
+            assertTrue(interactionBlock.contains(title))
+            assertFalse(fullscreenBlock.contains(title))
+        }
+    }
+
+    @Test
+    fun `fullscreen gesture section should own its setting state collection`() {
+        val source = loadSource(
+            "app/src/main/java/com/android/purebilibili/feature/settings/screen/PlaybackSettingsScreen.kt"
+        )
+
+        val contentBlock = source
+            .substringAfter("fun PlaybackSettingsContent(")
+            .substringBefore("private fun PlaybackInteractionSettingsSection(")
+
+        assertTrue(source.contains("private fun PlaybackFullscreenGestureSettingsSection(\n    context: Context"))
+        assertTrue(contentBlock.contains("PlaybackFullscreenGestureSettingsSection(context = context)"))
+        assertFalse(contentBlock.contains("getFullscreenMode(context)"))
+        assertFalse(contentBlock.contains("getAppGestureScreenshotEnabled(context)"))
+        assertFalse(contentBlock.contains("getPortraitPlayerCollapseMode(context)"))
+    }
+
+    @Test
+    fun `interaction section should own playback and comment setting state collection`() {
+        val source = loadSource(
+            "app/src/main/java/com/android/purebilibili/feature/settings/screen/PlaybackSettingsScreen.kt"
+        )
+
+        val contentBlock = source
+            .substringAfter("fun PlaybackSettingsContent(")
+            .substringBefore("private fun PlaybackInteractionSettingsSection(")
+
+        assertTrue(source.contains("private fun PlaybackInteractionSettingsSection(\n    context: Context"))
+        assertTrue(contentBlock.contains("PlaybackInteractionSettingsSection("))
+        assertTrue(contentBlock.contains("context = context"))
+        assertTrue(contentBlock.contains("state = state"))
+        assertTrue(contentBlock.contains("viewModel = viewModel"))
+        assertFalse(contentBlock.contains("getAutoPlay(context)"))
+        assertFalse(contentBlock.contains("getSubtitleAutoPreference(context)"))
+        assertFalse(contentBlock.contains("getCommentFraudDetectionEnabled(context)"))
+    }
+
+    @Test
     fun `resolveSelectionIndex should return matched option index`() {
         val options = listOf(
             PlaybackSegmentOption("avc1", "AVC"),
@@ -219,11 +291,15 @@ class PlaybackSettingsSelectionPolicyTest {
                 PortraitPlayerCollapseMode.OFF,
                 PortraitPlayerCollapseMode.INTRO_ONLY,
                 PortraitPlayerCollapseMode.COMMENT_ONLY,
-                PortraitPlayerCollapseMode.BOTH
+                PortraitPlayerCollapseMode.BOTH,
+                PortraitPlayerCollapseMode.PAUSED_ONLY
             ),
             modes
         )
-        assertEquals(listOf("关闭", "竖屏", "横屏", "全部"), resolvePortraitPlayerCollapseModeSegmentOptions().map { it.label })
+        assertEquals(
+            listOf("关闭", "竖屏", "横屏", "全部", "暂停时"),
+            resolvePortraitPlayerCollapseModeSegmentOptions().map { it.label }
+        )
     }
 
     @Test
@@ -231,7 +307,7 @@ class PlaybackSettingsSelectionPolicyTest {
         val source = File("src/main/java/com/android/purebilibili/feature/settings/screen/PlaybackSettingsScreen.kt")
             .readText()
         val block = source
-            .substringAfter("text = \"横屏滑动快进/快退步长\"")
+            .substringAfter("text = \"横屏滑动调进度范围\"")
             .substringBefore("val seekStepOptions = listOf(")
 
         assertTrue(block.contains("AppAdaptiveSwitch("))
@@ -239,13 +315,68 @@ class PlaybackSettingsSelectionPolicyTest {
     }
 
     @Test
-    fun `playback settings exposes attention command danmaku blocking switch`() {
+    fun `playback settings exposes interactive command danmaku hiding switch`() {
         val source = File("src/main/java/com/android/purebilibili/feature/settings/screen/PlaybackSettingsScreen.kt")
             .readText()
 
-        assertTrue(source.contains("屏蔽关注/点赞弹幕"))
-        assertTrue(source.contains("getDanmakuBlockAttentionCommands"))
-        assertTrue(source.contains("setDanmakuBlockAttentionCommands"))
+        assertTrue(source.contains("隐藏视频内互动提示"))
+        assertTrue(source.contains("getDanmakuHideInteractiveCommands"))
+        assertTrue(source.contains("setDanmakuHideInteractiveCommands"))
+    }
+
+    @Test
+    fun `playback settings exposes double tap seek switch and seconds`() {
+        val source = File("src/main/java/com/android/purebilibili/feature/settings/screen/PlaybackSettingsScreen.kt")
+            .readText()
+
+        assertTrue(source.contains("双击跳转"))
+        assertTrue(source.contains("getDoubleTapSeekEnabled"))
+        assertTrue(source.contains("setDoubleTapSeekEnabled"))
+        assertTrue(source.contains("getSeekForwardSeconds"))
+        assertTrue(source.contains("setSeekForwardSeconds"))
+        assertTrue(source.contains("getSeekBackwardSeconds"))
+        assertTrue(source.contains("setSeekBackwardSeconds"))
+    }
+
+    @Test
+    fun `playback settings exposes quality downgrade dialog switches`() {
+        val source = File("src/main/java/com/android/purebilibili/feature/settings/screen/PlaybackSettingsScreen.kt")
+            .readText()
+
+        assertTrue(source.contains("画质降档诊断弹窗"))
+        assertTrue(source.contains("降档弹窗仅提示一次"))
+        assertTrue(source.contains("getQualitySwitchFailureDialogEnabled"))
+        assertTrue(source.contains("setQualitySwitchFailureDialogEnabled"))
+        assertTrue(source.contains("getQualitySwitchFailureDialogOnceEnabled"))
+        assertTrue(source.contains("setQualitySwitchFailureDialogOnceEnabled"))
+    }
+
+    @Test
+    fun `playback settings exposes video note switches with collapse gated by enabled`() {
+        val source = File("src/main/java/com/android/purebilibili/feature/settings/screen/PlaybackSettingsScreen.kt")
+            .readText()
+
+        assertTrue(source.contains("显示视频笔记"))
+        assertTrue(source.contains("默认折叠视频笔记"))
+        assertTrue(source.contains("getVideoNoteEnabled"))
+        assertTrue(source.contains("setVideoNoteEnabled"))
+        assertTrue(source.contains("getVideoNoteDefaultCollapsed"))
+        assertTrue(source.contains("setVideoNoteDefaultCollapsed"))
+
+        val noteSwitchBlock = source
+            .substringAfter("title = \"显示视频笔记\"")
+            .substringBefore("title = \"默认折叠视频笔记\"")
+        assertTrue(noteSwitchBlock.contains("if (videoNoteEnabled)"))
+    }
+
+    @Test
+    fun `playback settings clarifies auto highest does not treat video cap as failure`() {
+        val source = File("src/main/java/com/android/purebilibili/feature/settings/screen/PlaybackSettingsScreen.kt")
+            .readText()
+
+        assertTrue(source.contains("视频实际最高可播"))
+        assertTrue(source.contains("视频本身无更高档不打断播放"))
+        assertTrue(source.contains("默认画质会作为关闭后的偏好保留"))
     }
 
     private fun loadSource(path: String): String {

@@ -46,6 +46,8 @@ import com.android.purebilibili.core.ui.blur.currentUnifiedBlurIntensity
 import com.android.purebilibili.feature.dynamic.resolveDynamicSidebarWidth
 import com.android.purebilibili.core.ui.blur.rememberRecoverableHazeState
 import com.android.purebilibili.core.ui.blur.unifiedBlur
+import com.android.purebilibili.feature.dynamic.resolveDynamicSidebarDividerTopOffset
+import com.android.purebilibili.feature.dynamic.resolveDynamicSidebarReturnHeaderHeightDp
 import com.android.purebilibili.feature.dynamic.shouldShowDynamicUserLiveBadge
 import com.android.purebilibili.feature.dynamic.SidebarUser
 
@@ -80,6 +82,7 @@ fun DynamicSidebar(
     // 读取模糊强度设置
     val blurIntensity = currentUnifiedBlurIntensity()
     val backgroundAlpha = BlurStyles.getBackgroundAlpha(blurIntensity)
+    val returnHeaderHeight = resolveDynamicSidebarReturnHeaderHeightDp().dp
     
     // 侧边栏容器 - Glassmorphism 升级版
     Box(
@@ -90,11 +93,6 @@ fun DynamicSidebar(
             .background(
                 MaterialTheme.colorScheme.surface // 纯白背景，减少割裂感
             )
-            .border(
-                width = 0.5.dp,
-                color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.2f),
-                shape = androidx.compose.ui.graphics.RectangleShape // [修复] 直角
-            )
     ) {
         // 内容层 - 使用 Box 重新组织布局以支持模糊
         Box(modifier = Modifier.fillMaxSize()) {
@@ -103,7 +101,7 @@ fun DynamicSidebar(
                 state = userListState,
                 horizontalAlignment = Alignment.CenterHorizontally,
                 contentPadding = PaddingValues(
-                    top = topPadding + 52.dp, // 为顶部返回按钮留出空间
+                    top = topPadding + returnHeaderHeight, // 与右侧动态顶栏同高，保证视觉中线一致
                     bottom = 16.dp
                 ),
                 modifier = Modifier
@@ -157,7 +155,7 @@ fun DynamicSidebar(
             Box(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .height(topPadding + 52.dp)
+                    .height(topPadding + returnHeaderHeight)
                     .unifiedBlur(sidebarHazeState) // 应用模糊
                     .background(MaterialTheme.colorScheme.surface.copy(alpha = backgroundAlpha))
                     .align(Alignment.TopCenter)
@@ -165,7 +163,7 @@ fun DynamicSidebar(
                 Box(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .height(44.dp)
+                        .height(returnHeaderHeight)
                         .align(Alignment.BottomCenter)
                         .clickable { onBackClick() },
                     contentAlignment = Alignment.Center
@@ -183,7 +181,8 @@ fun DynamicSidebar(
         // 右侧边框线 - 极细
         Box(
             modifier = Modifier
-                .align(Alignment.CenterEnd)
+                .align(Alignment.TopEnd)
+                .padding(top = resolveDynamicSidebarDividerTopOffset(topPadding))
                 .fillMaxHeight()
                 .width(0.5.dp)
                 .background(MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.2f))

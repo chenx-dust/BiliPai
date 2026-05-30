@@ -162,7 +162,10 @@ fun PortraitDetailSheet(
                             // 标题
                             val context = LocalContext.current
                             val blockedUpRepository = remember { com.android.purebilibili.data.repository.BlockedUpRepository(context) }
-                            val isBlocked by blockedUpRepository.isBlocked(info.owner.mid).collectAsState(initial = false)
+                            val isBlocked by blockedUpRepository.isBlocked(info.owner.mid).collectAsState(
+                                initial = false,
+                                context = kotlin.coroutines.EmptyCoroutineContext
+                            )
                             val scope = rememberCoroutineScope()
                             var showBlockConfirmDialog by remember { mutableStateOf(false) }
                             
@@ -176,11 +179,11 @@ fun PortraitDetailSheet(
                                             onClick = {
                                                 scope.launch {
                                                     if (isBlocked) {
-                                                        blockedUpRepository.unblockUp(info.owner.mid)
-                                                        android.widget.Toast.makeText(context, "已解除屏蔽", android.widget.Toast.LENGTH_SHORT).show()
+                                                        val result = blockedUpRepository.unblockUpWithBilibiliSync(info.owner.mid)
+                                                        android.widget.Toast.makeText(context, result.message, android.widget.Toast.LENGTH_SHORT).show()
                                                     } else {
-                                                        blockedUpRepository.blockUp(info.owner.mid, info.owner.name, info.owner.face)
-                                                        android.widget.Toast.makeText(context, "已屏蔽该 UP 主", android.widget.Toast.LENGTH_SHORT).show()
+                                                        val result = blockedUpRepository.blockUpWithBilibiliSync(info.owner.mid, info.owner.name, info.owner.face)
+                                                        android.widget.Toast.makeText(context, result.message, android.widget.Toast.LENGTH_SHORT).show()
                                                     }
                                                     showBlockConfirmDialog = false
                                                 }

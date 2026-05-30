@@ -14,8 +14,12 @@ class SearchChromePolicyTest {
     fun `md3 preset should use taller search chrome and filled action`() {
         val spec = resolveSearchChromeVisualSpec(UiPreset.MD3)
 
-        assertEquals(48, spec.inputHeightDp)
-        assertEquals(28, spec.inputCornerRadiusDp)
+        assertEquals(44, spec.inputHeightDp)
+        assertEquals(22, spec.inputCornerRadiusDp)
+        assertEquals(40, spec.clearActionSizeDp)
+        assertEquals(40, spec.submitActionSizeDp)
+        assertEquals(20, spec.actionIconSizeDp)
+        assertEquals(8, spec.horizontalGapDp)
         assertTrue(spec.useFilledSearchAction)
         assertEquals(20, spec.suggestionContainerCornerRadiusDp)
     }
@@ -24,8 +28,12 @@ class SearchChromePolicyTest {
     fun `ios preset should preserve compact capsule search chrome`() {
         val spec = resolveSearchChromeVisualSpec(UiPreset.IOS)
 
-        assertEquals(42, spec.inputHeightDp)
-        assertEquals(50, spec.inputCornerRadiusDp)
+        assertEquals(44, spec.inputHeightDp)
+        assertEquals(22, spec.inputCornerRadiusDp)
+        assertEquals(40, spec.clearActionSizeDp)
+        assertEquals(40, spec.submitActionSizeDp)
+        assertEquals(20, spec.actionIconSizeDp)
+        assertEquals(12, spec.inputHorizontalPaddingDp)
         assertFalse(spec.useFilledSearchAction)
         assertEquals(12, spec.suggestionContainerCornerRadiusDp)
     }
@@ -37,24 +45,13 @@ class SearchChromePolicyTest {
             androidNativeVariant = AndroidNativeVariant.MIUIX
         )
 
-        assertEquals(46, spec.inputHeightDp)
-        assertEquals(23, spec.inputCornerRadiusDp)
+        assertEquals(44, spec.inputHeightDp)
+        assertEquals(22, spec.inputCornerRadiusDp)
+        assertEquals(40, spec.clearActionSizeDp)
+        assertEquals(40, spec.submitActionSizeDp)
+        assertEquals(14, spec.inputHorizontalPaddingDp)
         assertTrue(spec.useFilledSearchAction)
         assertEquals(18, spec.suggestionContainerCornerRadiusDp)
-    }
-
-    @Test
-    fun `md3e variant should use expressive search chrome`() {
-        val spec = resolveSearchChromeVisualSpec(
-            uiPreset = UiPreset.MD3,
-            androidNativeVariant = AndroidNativeVariant.MATERIAL3_EXPRESSIVE
-        )
-
-        assertEquals(56, spec.inputHeightDp)
-        assertEquals(30, spec.inputCornerRadiusDp)
-        assertEquals(24, spec.actionContainerCornerRadiusDp)
-        assertTrue(spec.useFilledSearchAction)
-        assertEquals(28, spec.suggestionContainerCornerRadiusDp)
     }
 
     @Test

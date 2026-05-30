@@ -71,6 +71,59 @@ class BottomBarLiquidSegmentedControlStructureTest {
     }
 
     @Test
+    fun `segmented control only follows continuous drag when touch starts on indicator`() {
+        assertTrue(
+            shouldFollowSegmentedControlIndicatorDrag(
+                pointerX = 132f,
+                indicatorPosition = 2f,
+                itemWidthPx = 64f
+            )
+        )
+        assertFalse(
+            shouldFollowSegmentedControlIndicatorDrag(
+                pointerX = 80f,
+                indicatorPosition = 2f,
+                itemWidthPx = 64f
+            )
+        )
+        assertFalse(
+            shouldFollowSegmentedControlIndicatorDrag(
+                pointerX = 196.1f,
+                indicatorPosition = 2f,
+                itemWidthPx = 64f
+            )
+        )
+    }
+
+    @Test
+    fun `segmented control sweep release resolves label without requiring indicator follow`() {
+        assertEquals(
+            0,
+            resolveSegmentedControlSweepSelectionIndex(
+                pointerX = -12f,
+                itemWidthPx = 64f,
+                itemCount = 4
+            )
+        )
+        assertEquals(
+            1,
+            resolveSegmentedControlSweepSelectionIndex(
+                pointerX = 82f,
+                itemWidthPx = 64f,
+                itemCount = 4
+            )
+        )
+        assertEquals(
+            3,
+            resolveSegmentedControlSweepSelectionIndex(
+                pointerX = 260f,
+                itemWidthPx = 64f,
+                itemCount = 4
+            )
+        )
+    }
+
+    @Test
     fun `segmented indicator only samples hidden tab backdrop while sliding without external backdrop`() {
         assertFalse(
             shouldDrawSegmentedControlIndicatorBackdrop(
@@ -146,11 +199,20 @@ class BottomBarLiquidSegmentedControlStructureTest {
         assertTrue(source.contains("resolveBottomBarItemMotionVisual("))
         assertFalse(source.contains("rememberCombinedBackdrop("))
         assertTrue(source.contains("drawBackdrop("))
-        assertTrue(source.contains("Highlight.Default.copy(alpha = motionProgress)"))
-        assertTrue(source.contains("Shadow(alpha = if (liquidGlassEnabled) motionProgress else 0f)"))
+        assertTrue(source.contains("resolveBottomBarBackdropPresetProgress("))
+        assertTrue(source.contains("resolveBottomBarBackdropPresetCaptureLens("))
+        assertTrue(source.contains("resolveBottomBarBackdropPresetIndicatorLens("))
+        assertTrue(source.contains("resolveBottomBarLiquidGlassHighlightAlpha("))
+        assertTrue(source.contains("Highlight.Default.copy(alpha = captureHighlightAlpha)"))
+        assertTrue(source.contains("Shadow(alpha = indicatorGlowAlpha)"))
         assertTrue(source.contains("InnerShadow("))
-        assertTrue(source.contains("val indicatorScale = lerp(1f, 78f / 56f, motionProgress)"))
-        assertTrue(source.contains("velocity = dragState.velocity / 10f"))
+        assertTrue(source.contains("rememberBottomBarClickPulseTransform("))
+        assertTrue(source.contains("rememberBottomBarIndicatorDragScaleProgress("))
+        assertTrue(source.contains("resolveBottomBarIndicatorLayerTransform("))
+        assertTrue(source.contains("dragScaleProgress = indicatorLayerScaleProgress"))
+        assertFalse(source.contains("dragScaleProgress = maxOf(motionProgress, tapPressProgress)"))
+        assertFalse(source.contains("val indicatorScale = lerp(1f, 78f / 56f, motionProgress)"))
+        assertFalse(source.contains("velocity = dragState.velocity / 10f"))
         assertFalse(source.contains("resolveIosFloatingBottomIndicatorColor("))
         assertFalse(source.contains("resolveIosFloatingBottomIndicatorTintAlpha("))
         assertFalse(source.contains("resolveLiquidSegmentedIndicatorColor("))
@@ -170,8 +232,8 @@ class BottomBarLiquidSegmentedControlStructureTest {
         assertFalse(source.contains("val useIndicatorBackdrop = liquidGlassEnabled && indicatorVisualPolicy.shouldRefract"))
         assertFalse(source.contains("LiquidIndicator("))
         assertFalse(source.contains("backdrop = indicatorBackdrop"))
-        assertTrue(source.contains("refractionMotionProfile.indicatorLensAmountScale"))
-        assertTrue(source.contains("refractionMotionProfile.indicatorLensHeightScale"))
+        assertFalse(source.contains("refractionMotionProfile.indicatorLensAmountScale"))
+        assertFalse(source.contains("refractionMotionProfile.indicatorLensHeightScale"))
         assertTrue(source.contains("chromaticAberration = true"))
         assertFalse(source.contains("chromaticAberration = refractionMotionProfile.forceChromaticAberration"))
         assertFalse(source.contains("forceChromaticAberration = refractionMotionProfile.forceChromaticAberration"))
@@ -183,7 +245,12 @@ class BottomBarLiquidSegmentedControlStructureTest {
         assertTrue(source.contains("onIndicatorPositionChanged?.invoke(safeSelectedIndex.toFloat())"))
         assertTrue(source.contains(".widthIn(min = 28.dp, max = 56.dp)"))
         assertTrue(source.contains("if (enabled && itemCount > 1 && dragSelectionEnabled)"))
-        assertTrue(source.contains("consumePointerChanges = true"))
+        assertTrue(source.contains("Modifier.segmentedControlSelectionGesture("))
+        assertTrue(source.contains("change.consume()"))
+        assertTrue(source.contains("shouldFollowIndicatorFrom = { downX ->"))
+        assertTrue(source.contains("shouldFollowSegmentedControlIndicatorDrag("))
+        assertTrue(source.contains("onSweepSelected = { index ->"))
+        assertTrue(source.contains("resolveSegmentedControlSweepSelectionIndex("))
         assertTrue(source.contains("notifyIndexChanged = true"))
         assertTrue(source.contains("settleIndex = null"))
         assertTrue(source.contains("onPressChanged = dragState::setPressed"))
@@ -191,18 +258,23 @@ class BottomBarLiquidSegmentedControlStructureTest {
         assertFalse(source.contains("backdrop = if (shouldRefractContent)"))
         assertFalse(source.contains("backdrop = shellBackdrop"))
         assertFalse(source.contains(".clip(containerShape)"))
+        assertFalse(source.contains(".clip(indicatorShape)"))
         assertTrue(source.contains("resolveSegmentedControlIndicatorWidthDp("))
         assertTrue(source.contains("resolveSegmentedControlIndicatorHeightDp("))
         assertTrue(source.contains("resolveSegmentedControlIndicatorOffsetDp("))
         assertTrue(source.contains("shouldDrawSegmentedControlIndicatorBackdrop("))
         assertTrue(source.contains("val indicatorShape = resolveSharedBottomBarCapsuleShape()"))
+        assertTrue(source.contains("val containerShape = indicatorShape"))
+        assertFalse(source.contains("AppShapes.container(ContainerLevel.Pill)"))
         assertTrue(source.contains("shape = { indicatorShape }"))
         assertTrue(source.contains(".offset(x = indicatorOffset)"))
         assertTrue(source.contains(".width(indicatorWidth)"))
         assertTrue(source.contains(".height(resolvedIndicatorHeight)"))
         assertTrue(source.contains("layerBlock = {"))
-        assertTrue(source.contains("scaleX = indicatorScale / ("))
-        assertTrue(source.contains("scaleY = indicatorScale * ("))
+        assertTrue(source.contains("scaleX = clickPulseTransform.scaleX"))
+        assertTrue(source.contains("scaleY = clickPulseTransform.scaleY"))
+        assertTrue(source.contains("scaleX = indicatorLayerTransform.scaleX"))
+        assertTrue(source.contains("scaleY = indicatorLayerTransform.scaleY"))
         assertFalse(source.contains("scaleX = indicatorTransform.scaleX"))
         assertFalse(source.contains("scaleY = indicatorTransform.scaleY"))
         assertFalse(source.contains("containerWidthDp = maxWidth.value"))
@@ -215,7 +287,7 @@ class BottomBarLiquidSegmentedControlStructureTest {
         assertTrue(visibleLabelsIndex > indicatorIndex)
         assertFalse(source.contains("val indicatorPolicy = remember(itemCount)"))
         assertFalse(source.contains("resolveBottomBarIndicatorPolicy(itemCount = itemCount)"))
-        assertFalse(source.contains("motionSpec.refraction.panelOffsetMaxDp.dp.toPx()"))
+        assertTrue(source.contains("motionSpec.refraction.panelOffsetMaxDp.dp.toPx()"))
         assertFalse(source.contains("exportPanelOffsetPx"))
         assertFalse(source.contains("indicatorPanelOffsetPx"))
         assertFalse(source.contains("visiblePanelOffsetPx"))

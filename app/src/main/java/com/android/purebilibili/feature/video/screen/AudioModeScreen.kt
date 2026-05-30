@@ -13,7 +13,7 @@ import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.*
-import androidx.compose.foundation.pager.HorizontalPager
+import androidx.compose.foundation.pager.VerticalPager
 import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
@@ -50,13 +50,17 @@ import com.android.purebilibili.core.store.SettingsManager
 import com.android.purebilibili.core.theme.LocalUiPreset
 import com.android.purebilibili.core.theme.UiPreset
 import com.android.purebilibili.core.ui.AdaptiveScaffold
-import com.android.purebilibili.core.ui.AppIcons
+import com.android.purebilibili.core.ui.rememberAppBookmarkIcon
+import com.android.purebilibili.core.ui.rememberAppCoinIcon
+import com.android.purebilibili.core.ui.rememberAppLikeFilledIcon
+import com.android.purebilibili.core.ui.rememberAppLikeIcon
 import com.android.purebilibili.core.ui.resolveBottomSafeAreaPadding
 import com.android.purebilibili.core.util.FormatUtils
 import com.android.purebilibili.feature.home.components.BottomBarLiquidSegmentedControl
 import com.android.purebilibili.feature.video.ui.components.CoinDialog
 import com.android.purebilibili.feature.video.player.PlayMode
 import com.android.purebilibili.feature.video.player.PlaylistManager
+import com.android.purebilibili.feature.video.state.rememberVideoPlayerState
 import com.android.purebilibili.feature.video.ui.components.CollectionSheet  // 📂 [新增] 合集弹窗
 import com.android.purebilibili.feature.video.viewmodel.PlayerUiState
 import com.android.purebilibili.feature.video.viewmodel.PlayerViewModel
@@ -65,7 +69,6 @@ import io.github.alexzhirkevich.cupertino.icons.filled.*
 import io.github.alexzhirkevich.cupertino.icons.outlined.*
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
-import kotlin.math.abs
 import kotlin.math.roundToInt
 
 internal fun resolveAudioPlayModeLabel(mode: PlayMode): String {
@@ -103,6 +106,17 @@ internal fun resolveAudioModePlayPauseAction(
         else -> if (playWhenReady) AudioModePlayPauseAction.PAUSE else AudioModePlayPauseAction.RESUME
     }
 }
+
+internal fun shouldCreateAudioModeStandalonePlayer(
+    hasPlayer: Boolean,
+    initialBvid: String
+): Boolean {
+    return !hasPlayer && initialBvid.isNotBlank()
+}
+
+internal fun resolveAudioModePageSwitchAutoPlay(): Boolean = true
+
+internal fun resolveAudioModeCollectionSwitchAutoPlay(): Boolean = true
 
 internal fun shouldShowAudioModePipButton(sdkInt: Int): Boolean = sdkInt >= Build.VERSION_CODES.O
 
@@ -180,14 +194,20 @@ private fun enterAudioModePip(activity: Activity?) {
 fun AudioModeScreen(
     viewModel: PlayerViewModel,
     onBack: () -> Unit,
-    onVideoModeClick: (String) -> Unit,  //  传递当前视频的 bvid
-    isInPipMode: Boolean = false
+    onVideoModeClick: (String, Long) -> Unit,  //  传递当前视频的 bvid/cid
+    isInPipMode: Boolean = false,
+    initialBvid: String = "",
+    initialCid: Long = 0L,
+    initialResumePositionMs: Long = 0L
 ) {
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
     val sleepTimerMinutes by viewModel.sleepTimerMinutes.collectAsStateWithLifecycle()
     val context = LocalContext.current
     val uiPreset = LocalUiPreset.current
-    val homeSettings by SettingsManager.getHomeSettings(context).collectAsState(initial = HomeSettings())
+    val homeSettings by SettingsManager.getHomeSettings(context).collectAsState(
+        initial = HomeSettings(),
+        context = kotlin.coroutines.EmptyCoroutineContext
+    )
     val useLiquidPlayModeControl = remember(uiPreset, homeSettings.androidNativeLiquidGlassEnabled) {
         shouldUseAudioModeLiquidPlayModeControl(
             uiPreset = uiPreset,
@@ -200,11 +220,8 @@ fun AudioModeScreen(
         resolveAudioModeRenderPolicy(isInPipMode = isInPipMode)
     }
     
-    //  通过共享的 ViewModel 获取播放器实例，实现无缝音频播放
-    val player = viewModel.currentPlayer
-    
     //  投币对话框状态
-    val coinDialogVisible by viewModel.coinDialogVisible.collectAsState()
+    val coinDialogVisible by viewModel.coinDialogVisible.collectAsState(context = kotlin.coroutines.EmptyCoroutineContext)
     val currentCoinCount = (uiState as? PlayerUiState.Success)?.coinCount ?: 0
     
     //  缓存最后一次成功的状态，在加载时继续显示
@@ -224,11 +241,43 @@ fun AudioModeScreen(
         else -> null
     }
 
+    val shouldCreateStandalonePlayer = remember(initialBvid) {
+        shouldCreateAudioModeStandalonePlayer(
+            hasPlayer = viewModel.currentPlayer != null,
+            initialBvid = initialBvid
+        )
+    }
+    val standalonePlayerState = if (shouldCreateStandalonePlayer) {
+        rememberVideoPlayerState(
+            context = context,
+            viewModel = viewModel,
+            bvid = initialBvid,
+            cid = initialCid,
+            fallbackResumePositionMs = initialResumePositionMs
+        )
+    } else {
+        null
+    }
+    // 通过共享或听视频页自建的 ViewModel player 获取播放控制实例。
+    val player = standalonePlayerState?.player ?: viewModel.currentPlayer
+
+    LaunchedEffect(initialBvid, initialCid, initialResumePositionMs, shouldCreateStandalonePlayer) {
+        if (!shouldCreateStandalonePlayer && displayState == null && initialBvid.isNotBlank()) {
+            viewModel.loadVideo(
+                bvid = initialBvid,
+                cid = initialCid,
+                autoPlay = true,
+                fallbackResumePositionMs = initialResumePositionMs
+            )
+        }
+    }
+
     //  封面显示模式状态
     var isFullScreenCover by remember { mutableStateOf(false) }
     
     // 📂 [新增] 合集弹窗状态
     var showCollectionSheet by remember { mutableStateOf(false) }
+    var pendingCollectionSwitchBvid by remember { mutableStateOf<String?>(null) }
     var showSleepTimerDialog by remember { mutableStateOf(false) }
     val controlsBottomPadding = resolveBottomSafeAreaPadding(
         navigationBarsBottom = WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding(),
@@ -260,9 +309,9 @@ fun AudioModeScreen(
                 val successState = displayState
                 
                 // ==================== 共享状态逻辑 ====================
-                val playlist by PlaylistManager.playlist.collectAsState()
-                val currentIndex by PlaylistManager.currentIndex.collectAsState()
-                val currentPlayMode by PlaylistManager.playMode.collectAsState()
+                val playlist by PlaylistManager.playlist.collectAsState(context = kotlin.coroutines.EmptyCoroutineContext)
+                val currentIndex by PlaylistManager.currentIndex.collectAsState(context = kotlin.coroutines.EmptyCoroutineContext)
+                val currentPlayMode by PlaylistManager.playMode.collectAsState(context = kotlin.coroutines.EmptyCoroutineContext)
                 
                 // 预加载相邻封面 - 使用 Coil 单例
                 val imageLoader = coil.Coil.imageLoader(context)
@@ -291,9 +340,15 @@ fun AudioModeScreen(
                 val density = LocalDensity.current
 
                 // 同步 Pager 和 PlaylistManager
-                LaunchedEffect(currentIndex) {
+                LaunchedEffect(currentIndex, playlist, pendingCollectionSwitchBvid) {
                     if (pagerState.currentPage != currentIndex && currentIndex in 0 until playlist.size) {
-                        pagerState.animateScrollToPage(currentIndex)
+                        val currentPlaylistBvid = playlist.getOrNull(currentIndex)?.bvid
+                        if (pendingCollectionSwitchBvid != null && pendingCollectionSwitchBvid == currentPlaylistBvid) {
+                            pagerState.scrollToPage(currentIndex)
+                            pendingCollectionSwitchBvid = null
+                        } else {
+                            pagerState.animateScrollToPage(currentIndex)
+                        }
                     }
                 }
                 // 当用户滑动 Pager 时，直接加载对应视频
@@ -301,7 +356,12 @@ fun AudioModeScreen(
                     val settledPage = pagerState.settledPage
                     if (settledPage != currentIndex && playlist.isNotEmpty() && settledPage in playlist.indices) {
                         val targetItem = PlaylistManager.playAt(settledPage)
-                        targetItem?.let { viewModel.loadVideo(it.bvid) }
+                        targetItem?.let {
+                            viewModel.loadVideo(
+                                bvid = it.bvid,
+                                autoPlay = resolveAudioModePageSwitchAutoPlay()
+                            )
+                        }
                     }
                 }
 
@@ -328,7 +388,7 @@ fun AudioModeScreen(
                                 Row(
                                     modifier = Modifier
                                         .clip(RoundedCornerShape(20.dp))
-                                        .clickable { onVideoModeClick(info.bvid) }
+                                        .clickable { onVideoModeClick(info.bvid, info.cid) }
                                         .padding(horizontal = 8.dp, vertical = 6.dp),
                                     verticalAlignment = Alignment.CenterVertically
                                 ) {
@@ -453,24 +513,28 @@ fun AudioModeScreen(
                         Spacer(modifier = Modifier.height(32.dp))
                         
                         // 3. 互动按钮行
+                        val likeIcon = rememberAppLikeIcon()
+                        val likeFilledIcon = rememberAppLikeFilledIcon()
+                        val coinIcon = rememberAppCoinIcon()
+                        val favoriteIcon = rememberAppBookmarkIcon()
                         Row(
                             modifier = Modifier.fillMaxWidth(),
                             horizontalArrangement = Arrangement.SpaceEvenly
                         ) {
                             InteractionButton(
-                                icon = if (successState.isLiked) CupertinoIcons.Filled.HandThumbsup else CupertinoIcons.Default.HandThumbsup,
+                                icon = if (successState.isLiked) likeFilledIcon else likeIcon,
                                 label = FormatUtils.formatStat(info.stat.like.toLong()),
                                 isActive = successState.isLiked,
                                 onClick = { viewModel.toggleLike() }
                             )
                             InteractionButton(
-                                icon = AppIcons.BiliCoin,
+                                icon = coinIcon,
                                 label = FormatUtils.formatStat(info.stat.coin.toLong()),
                                 isActive = successState.coinCount > 0,
                                 onClick = { viewModel.openCoinDialog() }
                             )
                             InteractionButton(
-                                icon = if (successState.isFavorited) CupertinoIcons.Filled.Bookmark else CupertinoIcons.Default.Bookmark,
+                                icon = favoriteIcon,
                                 label = FormatUtils.formatStat(info.stat.favorite.toLong()),
                                 isActive = successState.isFavorited,
                                 onClick = { viewModel.toggleFavorite() }
@@ -489,9 +553,8 @@ fun AudioModeScreen(
                                     // [修复] 确保 seek 后音量正常
                                     player.volume = 1.0f
                                 },
-                                onPrevious = { viewModel.playPreviousRecommended() },
-                                // 🎵 [修复] 使用分P优先播放方法
-                                onNext = { viewModel.playNextPageOrRecommended() },
+                                onPrevious = { viewModel.playPreviousAudioModeTrack() },
+                                onNext = { viewModel.playNextAudioModeTrack() },
                                 currentPlayMode = currentPlayMode,
                                 onSelectPlayMode = { PlaylistManager.setPlayMode(it) },
                                 useLiquidPlayModeControl = useLiquidPlayModeControl
@@ -521,7 +584,7 @@ fun AudioModeScreen(
                     // 1. 底层：Pager 作为背景，填满全屏
                     Box(modifier = Modifier.fillMaxSize()) {
                         if (playlist.isNotEmpty()) {
-                            HorizontalPager(
+                            VerticalPager(
                                 state = pagerState,
                                 modifier = Modifier.fillMaxSize(),
                                 beyondViewportPageCount = 1,
@@ -626,17 +689,21 @@ fun AudioModeScreen(
                                 availableHeightDp = maxHeight.value.roundToInt()
                             )
                             if (playlist.isNotEmpty()) {
-                                HorizontalPager(
+                                VerticalPager(
                                     state = pagerState,
                                     modifier = Modifier.fillMaxSize(),
-                                    // 关键：不设置 contentPadding，让 Pager 占满宽度，这样旋转时不会在边界被裁剪
-                                    contentPadding = PaddingValues(horizontal = 0.dp),
+                                    // 关键：不设置 contentPadding，让 Pager 占满高度，这样旋转时不会在边界被裁剪
+                                    contentPadding = PaddingValues(vertical = 0.dp),
                                     beyondViewportPageCount = 1,
                                     key = { it }  // [修复] 使用索引作为 key，避免重复 bvid 导致崩溃
                                 ) { page ->
                                     val pageOffset = (pagerState.currentPage - page) + pagerState.currentPageOffsetFraction
-                                    
-                                    // 计算 3D 效果
+                                    val pageTransform = resolveAudioModeVerticalPageTransform(
+                                        pageOffset = pageOffset,
+                                        style = artworkStyle
+                                    )
+
+                                    // 轻量 3D：上下翻页时只做 layer 透视，不引入额外渲染管线。
                                     Box(
                                         modifier = Modifier.fillMaxSize(),
                                         contentAlignment = Alignment.Center
@@ -647,23 +714,16 @@ fun AudioModeScreen(
                                                 .width(coverSizeDp.widthDp.dp)
                                                 .height(coverSizeDp.heightDp.dp)
                                                 .graphicsLayer {
-                                                    val clampedOffset = pageOffset.coerceIn(-1f, 1f)
-                                                    val distance = abs(clampedOffset)
-                                                    rotationY = clampedOffset * -artworkStyle.maxRotationDegrees
+                                                    rotationX = pageTransform.rotationXDegrees
                                                     cameraDistance = 18f * density.density
                                                     transformOrigin = TransformOrigin(
-                                                        pivotFractionX = if (clampedOffset < 0f) 1f else 0f,
-                                                        pivotFractionY = 0.5f
+                                                        pivotFractionX = 0.5f,
+                                                        pivotFractionY = pageTransform.pivotFractionY
                                                     )
-                                                    translationX = clampedOffset * -artworkStyle.maxTranslationDp.dp.toPx()
-                                                    val scale = 1f -
-                                                        (distance * artworkStyle.maxScaleLossPercent / 100f)
-                                                            .coerceIn(0f, artworkStyle.maxScaleLossPercent / 100f)
-                                                    scaleX = scale
-                                                    scaleY = scale
-                                                    alpha = 1f -
-                                                        (distance * artworkStyle.maxAlphaLossPercent / 100f)
-                                                            .coerceIn(0f, artworkStyle.maxAlphaLossPercent / 100f)
+                                                    translationY = pageTransform.translationYDp.dp.toPx()
+                                                    scaleX = pageTransform.scale
+                                                    scaleY = pageTransform.scale
+                                                    alpha = pageTransform.alpha
                                                 }
                                         ) {
                                             AudioModeArtworkCard(
@@ -705,7 +765,7 @@ fun AudioModeScreen(
     }
     
     //  投币对话框
-    val userBalance by viewModel.userCoinBalance.collectAsState()
+    val userBalance by viewModel.userCoinBalance.collectAsState(context = kotlin.coroutines.EmptyCoroutineContext)
     CoinDialog(
         visible = coinDialogVisible,
         currentCoinCount = currentCoinCount,
@@ -725,7 +785,12 @@ fun AudioModeScreen(
                 onDismiss = { showCollectionSheet = false },
                 onEpisodeClick = { episode ->
                     showCollectionSheet = false
-                    viewModel.loadVideo(episode.bvid, cid = episode.cid)
+                    pendingCollectionSwitchBvid = episode.bvid
+                    viewModel.loadVideo(
+                        bvid = episode.bvid,
+                        cid = episode.cid,
+                        autoPlay = resolveAudioModeCollectionSwitchAutoPlay()
+                    )
                 }
             )
         }

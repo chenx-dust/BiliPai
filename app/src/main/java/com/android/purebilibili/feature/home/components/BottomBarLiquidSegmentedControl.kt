@@ -3,6 +3,9 @@ package com.android.purebilibili.feature.home.components
 import androidx.compose.animation.core.EaseOut
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.awaitFirstDown
+import androidx.compose.foundation.gestures.awaitHorizontalTouchSlopOrCancellation
+import androidx.compose.foundation.gestures.horizontalDrag
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.isSystemInDarkTheme
@@ -17,6 +20,7 @@ import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
@@ -26,6 +30,7 @@ import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -34,6 +39,8 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ColorFilter
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.input.pointer.util.VelocityTracker
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.semantics.clearAndSetSemantics
@@ -43,17 +50,19 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.TextUnit
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import androidx.compose.ui.util.lerp
 import com.android.purebilibili.core.store.SettingsManager
 import com.android.purebilibili.core.store.HomeSettings
 import com.android.purebilibili.core.store.resolveEffectiveLiquidGlassEnabled
 import com.android.purebilibili.core.theme.LocalUiPreset
 import com.android.purebilibili.core.theme.UiPreset
-import com.android.purebilibili.core.ui.animation.horizontalDragGesture
+import com.android.purebilibili.core.ui.AppSurfaceTokens
+import com.android.purebilibili.core.ui.animation.DampedDragAnimationState
 import com.android.purebilibili.core.ui.animation.rememberDampedDragAnimationState
 import com.android.purebilibili.core.ui.adaptive.MotionTier
 import com.android.purebilibili.core.ui.blur.currentUnifiedBlurIntensity
 import com.android.purebilibili.core.ui.motion.BottomBarMotionProfile
+import com.android.purebilibili.core.ui.motion.BottomBarMotionSpec
+import com.android.purebilibili.core.ui.motion.MotionSpringConfig
 import com.android.purebilibili.core.ui.motion.resolveBottomBarMotionSpec
 import com.kyant.backdrop.Backdrop
 import com.kyant.backdrop.backdrops.layerBackdrop
@@ -131,6 +140,28 @@ internal fun resolveSegmentedControlIndicatorOffsetDp(
     return contentPaddingDp + (slotWidthDp * position)
 }
 
+internal fun shouldFollowSegmentedControlIndicatorDrag(
+    pointerX: Float,
+    indicatorPosition: Float,
+    itemWidthPx: Float
+): Boolean {
+    if (itemWidthPx <= 0f) return false
+    val startX = indicatorPosition * itemWidthPx
+    val endX = startX + itemWidthPx
+    return pointerX in startX..endX
+}
+
+internal fun resolveSegmentedControlSweepSelectionIndex(
+    pointerX: Float,
+    itemWidthPx: Float,
+    itemCount: Int
+): Int {
+    if (itemWidthPx <= 0f || itemCount <= 0) return 0
+    return (pointerX.coerceAtLeast(0f) / itemWidthPx)
+        .toInt()
+        .coerceIn(0, itemCount - 1)
+}
+
 internal fun shouldDrawSegmentedControlIndicatorBackdrop(
     liquidGlassEnabled: Boolean,
     motionProgress: Float,
@@ -138,6 +169,129 @@ internal fun shouldDrawSegmentedControlIndicatorBackdrop(
 ): Boolean {
     if (!liquidGlassEnabled) return false
     return hasExternalBackdrop || motionProgress > 0.001f
+}
+
+internal fun resolveSegmentedControlMotionProgress(
+    pressProgress: Float,
+    refractionProgress: Float,
+    tapPressRefractionEnabled: Boolean
+): Float {
+    val resolvedPressProgress = if (tapPressRefractionEnabled) pressProgress else 0f
+    return maxOf(resolvedPressProgress, refractionProgress)
+}
+
+internal fun resolveSegmentedControlMotionSpec(): BottomBarMotionSpec {
+    val base = resolveBottomBarMotionSpec(profile = BottomBarMotionProfile.ANDROID_NATIVE_FLOATING)
+    return base.copy(
+        drag = base.drag.copy(
+            selectionSpring = MotionSpringConfig(
+                dampingRatio = 0.88f,
+                stiffness = 320f
+            ),
+            offsetSnapSpring = MotionSpringConfig(
+                dampingRatio = 0.84f,
+                stiffness = 300f
+            )
+        ),
+        refraction = base.refraction.copy(
+            speedProgressDivisorPxPerSecond = 1700f,
+            dragProgressFloor = 0.14f,
+            panelOffsetMaxDp = 3f
+        ),
+        indicator = base.indicator.copy(
+            scaleSpring = MotionSpringConfig(
+                dampingRatio = 0.58f,
+                stiffness = 420f
+            ),
+            dragScaleSpring = MotionSpringConfig(
+                dampingRatio = 0.64f,
+                stiffness = 320f
+            ),
+            lensVelocityRangePxPerSecond = 3200f,
+            capsuleVelocityNormalizationDivisor = 14f,
+            capsuleVelocityScaleXMultiplier = 0.52f,
+            capsuleVelocityScaleYMultiplier = 0.18f,
+            capsuleVelocityClamp = 0.14f
+        )
+    )
+}
+
+private fun Modifier.segmentedControlSelectionGesture(
+    dragState: DampedDragAnimationState,
+    itemWidthPx: Float,
+    itemCount: Int,
+    currentSelectedIndex: Int,
+    onSweepSelected: (Int) -> Unit,
+    shouldFollowIndicatorFrom: (Float) -> Boolean
+): Modifier = this.pointerInput(
+    dragState,
+    itemWidthPx,
+    itemCount,
+    currentSelectedIndex,
+    shouldFollowIndicatorFrom
+) {
+    val velocityTracker = VelocityTracker()
+
+    awaitPointerEventScope {
+        while (true) {
+            val down = awaitFirstDown(requireUnconsumed = false)
+            val shouldFollowIndicator = shouldFollowIndicatorFrom(down.position.x)
+            var latestPositionX = down.position.x
+            velocityTracker.resetTracking()
+            velocityTracker.addPosition(down.uptimeMillis, down.position)
+
+            val dragStart = awaitHorizontalTouchSlopOrCancellation(down.id) { change, over ->
+                latestPositionX = change.position.x
+                change.consume()
+                if (shouldFollowIndicator) {
+                    dragState.onDrag(over, itemWidthPx)
+                }
+            }
+
+            if (dragStart != null) {
+                velocityTracker.addPosition(dragStart.uptimeMillis, dragStart.position)
+
+                var isCancelled = false
+                try {
+                    horizontalDrag(dragStart.id) { change ->
+                        change.consume()
+                        latestPositionX = change.position.x
+                        velocityTracker.addPosition(change.uptimeMillis, change.position)
+
+                        if (shouldFollowIndicator) {
+                            val dragAmount = change.position.x - change.previousPosition.x
+                            dragState.onDrag(dragAmount, itemWidthPx)
+                        }
+                    }
+                } catch (e: Exception) {
+                    isCancelled = true
+                }
+
+                if (shouldFollowIndicator) {
+                    val velocityX = if (isCancelled) {
+                        0f
+                    } else {
+                        velocityTracker.calculateVelocity().x
+                    }
+                    dragState.onDragEnd(
+                        velocityX = velocityX,
+                        itemWidthPx = itemWidthPx,
+                        settleIndex = null,
+                        notifyIndexChanged = true
+                    )
+                } else if (!isCancelled) {
+                    val releaseIndex = resolveSegmentedControlSweepSelectionIndex(
+                        pointerX = latestPositionX,
+                        itemWidthPx = itemWidthPx,
+                        itemCount = itemCount
+                    )
+                    if (releaseIndex != currentSelectedIndex) {
+                        onSweepSelected(releaseIndex)
+                    }
+                }
+            }
+        }
+    }
 }
 
 @Composable
@@ -158,6 +312,7 @@ fun BottomBarLiquidSegmentedControl(
     preferInlineContentStyle: Boolean = false,
     forceLiquidChrome: Boolean = false,
     backdrop: Backdrop? = null,
+    tapPressRefractionEnabled: Boolean = true,
     onIndicatorPositionChanged: ((Float) -> Unit)? = null
 ) {
     if (items.isEmpty()) return
@@ -166,7 +321,10 @@ fun BottomBarLiquidSegmentedControl(
     val uiPreset = LocalUiPreset.current
     val homeSettings by SettingsManager
         .getHomeSettings(context)
-        .collectAsState(initial = HomeSettings())
+        .collectAsState(
+            initial = HomeSettings(),
+            context = kotlin.coroutines.EmptyCoroutineContext
+        )
     val effectiveAndroidNativeLiquidGlassEnabled =
         forceLiquidChrome || homeSettings.androidNativeLiquidGlassEnabled
     val chromeStyle = resolveSegmentedControlChromeStyle(
@@ -199,9 +357,9 @@ fun BottomBarLiquidSegmentedControl(
     val density = LocalDensity.current
     val itemCount = items.size
     val safeSelectedIndex = selectedIndex.coerceIn(0, itemCount - 1)
-    val motionSpec = remember {
-        resolveBottomBarMotionSpec(profile = BottomBarMotionProfile.ANDROID_NATIVE_FLOATING)
-    }
+    val motionSpec = remember { resolveSegmentedControlMotionSpec() }
+    val clickPulseKey = remember { mutableIntStateOf(0) }
+    val clickPulseTransform = rememberBottomBarClickPulseTransform(clickPulseKey.intValue)
     val dragState = rememberDampedDragAnimationState(
         initialIndex = safeSelectedIndex,
         itemCount = itemCount,
@@ -212,11 +370,11 @@ fun BottomBarLiquidSegmentedControl(
             }
         }
     )
-    val containerShape = RoundedCornerShape(height / 2)
     val indicatorShape = resolveSharedBottomBarCapsuleShape()
+    val containerShape = indicatorShape
     val indicatorCorner = indicatorHeight / 2
     val isDarkTheme = isSystemInDarkTheme()
-    val surfaceColor = MaterialTheme.colorScheme.surface
+    val surfaceColor = AppSurfaceTokens.cardContainer()
     val androidNativeTuning = resolveAndroidNativeBottomBarTuning(
         blurEnabled = liquidGlassEnabled,
         darkTheme = isDarkTheme
@@ -226,7 +384,8 @@ fun BottomBarLiquidSegmentedControl(
         tuning = androidNativeTuning,
         glassEnabled = liquidGlassEnabled,
         blurEnabled = liquidGlassEnabled,
-        blurIntensity = blurIntensity
+        blurIntensity = blurIntensity,
+        liquidGlassPreset = homeSettings.bottomBarLiquidGlassPreset
     )
     val selectedTextColor = MaterialTheme.colorScheme.primary
     val unselectedTextColor = MaterialTheme.colorScheme.onSurface.copy(alpha = if (enabled) 0.78f else 0.42f)
@@ -234,6 +393,11 @@ fun BottomBarLiquidSegmentedControl(
         themeColor = selectedTextColor,
         darkTheme = isDarkTheme
     )
+    fun selectFromTap(index: Int) {
+        if (!enabled || index !in items.indices) return
+        clickPulseKey.intValue += 1
+        onSelected(index)
+    }
     LaunchedEffect(safeSelectedIndex) {
         dragState.updateIndex(safeSelectedIndex)
     }
@@ -268,12 +432,23 @@ fun BottomBarLiquidSegmentedControl(
         ).dp
         val itemWidthPx = with(density) { slotWidth.toPx() }.coerceAtLeast(1f)
         val dragModifier = if (enabled && itemCount > 1 && dragSelectionEnabled) {
-            Modifier.horizontalDragGesture(
+            Modifier.segmentedControlSelectionGesture(
                 dragState = dragState,
                 itemWidthPx = itemWidthPx,
-                consumePointerChanges = true,
-                settleIndex = null,
-                notifyIndexChanged = true
+                itemCount = itemCount,
+                currentSelectedIndex = safeSelectedIndex,
+                onSweepSelected = { index ->
+                    if (index != safeSelectedIndex) {
+                        onSelected(index)
+                    }
+                },
+                shouldFollowIndicatorFrom = { downX ->
+                    shouldFollowSegmentedControlIndicatorDrag(
+                        pointerX = downX,
+                        indicatorPosition = dragState.value,
+                        itemWidthPx = itemWidthPx
+                    )
+                }
             )
         } else {
             Modifier
@@ -291,18 +466,50 @@ fun BottomBarLiquidSegmentedControl(
             isDragging = dragState.isDragging,
             motionSpec = motionSpec
         )
-        val motionProgress = maxOf(pressMotionProgress, refractionMotionProfile.progress)
+        val motionProgress = resolveSegmentedControlMotionProgress(
+            pressProgress = pressMotionProgress,
+            refractionProgress = refractionMotionProfile.progress,
+            tapPressRefractionEnabled = tapPressRefractionEnabled
+        )
+        val tapPressProgress = if (tapPressRefractionEnabled) pressMotionProgress else 0f
+        val indicatorDragScaleProgress = rememberBottomBarIndicatorDragScaleProgress(
+            isDragging = dragState.isDragging
+        )
+        val indicatorLayerScaleProgress = maxOf(indicatorDragScaleProgress, tapPressProgress)
         val panelOffsetPx by remember(density, itemWidthPx) {
             derivedStateOf {
                 val fraction = (dragState.dragOffset / itemWidthPx).coerceIn(-1f, 1f)
                 with(density) {
-                    4.dp.toPx() * fraction.sign * EaseOut.transform(abs(fraction))
+                    motionSpec.refraction.panelOffsetMaxDp.dp.toPx() *
+                        fraction.sign *
+                        EaseOut.transform(abs(fraction))
                 }
             }
         }
         val tabsBackdrop = rememberLayerBackdrop()
         val containerBackdrop = backdrop ?: tabsBackdrop
         val contentBackdrop = tabsBackdrop
+        val backdropPresetProgress = resolveBottomBarBackdropPresetProgress(
+            motionProgress = motionProgress,
+            verticalProgress = 0f,
+            pressProgress = tapPressProgress
+        )
+        val captureLensSpec = resolveBottomBarBackdropPresetCaptureLens(
+            progress = backdropPresetProgress.captureProgress
+        )
+        val indicatorLensSpec = resolveBottomBarBackdropPresetIndicatorLens(
+            progress = backdropPresetProgress.indicatorProgress
+        )
+        val captureHighlightAlpha = resolveBottomBarLiquidGlassHighlightAlpha(
+            backdropPresetProgress.captureProgress
+        )
+        val indicatorHighlightAlpha = resolveBottomBarLiquidGlassHighlightAlpha(
+            backdropPresetProgress.indicatorProgress
+        )
+        val indicatorGlowAlpha = resolveBottomBarIndicatorGlowAlpha(
+            glassEnabled = liquidGlassEnabled,
+            pressProgress = tapPressProgress
+        )
 
         Box(
             modifier = Modifier
@@ -317,7 +524,8 @@ fun BottomBarLiquidSegmentedControl(
                     hazeState = null,
                     motionTier = MotionTier.Normal,
                     isTransitionRunning = false,
-                    forceLowBlurBudget = false
+                    forceLowBlurBudget = false,
+                    liquidGlassPreset = homeSettings.bottomBarLiquidGlassPreset
                 )
         )
 
@@ -337,16 +545,14 @@ fun BottomBarLiquidSegmentedControl(
                                 vibrancy()
                                 blur(androidNativeTuning.shellBlurRadiusDp.dp.toPx())
                                 lens(
-                                    refractionHeight = 24.dp.toPx() *
-                                        motionProgress *
-                                        refractionMotionProfile.indicatorLensHeightScale,
-                                    refractionAmount = 24.dp.toPx() *
-                                        motionProgress *
-                                        refractionMotionProfile.indicatorLensAmountScale
+                                    refractionHeight = captureLensSpec.refractionHeightDp.dp.toPx(),
+                                    refractionAmount = captureLensSpec.refractionAmountDp.dp.toPx(),
+                                    depthEffect = true,
+                                    chromaticAberration = true
                                 )
                             },
                             highlight = {
-                                Highlight.Default.copy(alpha = motionProgress)
+                                Highlight.Default.copy(alpha = captureHighlightAlpha)
                             },
                             onDrawSurface = {
                                 drawRect(containerColor)
@@ -382,6 +588,8 @@ fun BottomBarLiquidSegmentedControl(
                 .offset(x = indicatorOffset)
                 .graphicsLayer {
                     translationX = panelOffsetPx
+                    scaleX = clickPulseTransform.scaleX
+                    scaleY = clickPulseTransform.scaleY
                 }
                 .width(indicatorWidth)
                 .height(resolvedIndicatorHeight)
@@ -398,42 +606,35 @@ fun BottomBarLiquidSegmentedControl(
                             shape = { indicatorShape },
                             effects = {
                                 lens(
-                                    refractionHeight = 12.dp.toPx() *
-                                        motionProgress *
-                                        refractionMotionProfile.indicatorLensHeightScale,
-                                    refractionAmount = 18.dp.toPx() *
-                                        motionProgress *
-                                        refractionMotionProfile.indicatorLensAmountScale,
+                                    refractionHeight = indicatorLensSpec.refractionHeightDp.dp.toPx(),
+                                    refractionAmount = indicatorLensSpec.refractionAmountDp.dp.toPx(),
                                     depthEffect = true,
                                     chromaticAberration = true
                                 )
                             },
                             highlight = {
-                                Highlight.Default.copy(alpha = motionProgress)
+                                Highlight.Default.copy(alpha = maxOf(indicatorHighlightAlpha, indicatorGlowAlpha))
                             },
                             shadow = {
-                                Shadow(alpha = if (liquidGlassEnabled) motionProgress else 0f)
+                                Shadow(alpha = indicatorGlowAlpha)
                             },
                             innerShadow = {
                                 InnerShadow(
-                                    radius = 8.dp * motionProgress,
-                                    alpha = if (liquidGlassEnabled) motionProgress else 0f
+                                    radius = 8.dp * indicatorGlowAlpha,
+                                    alpha = indicatorGlowAlpha
                                 )
                             },
                             layerBlock = {
                                 if (liquidGlassEnabled) {
-                                    val indicatorScale = lerp(1f, 78f / 56f, motionProgress)
-                                    val velocity = dragState.velocity / 10f
-                                    scaleX = indicatorScale / (
-                                        1f - (
-                                            velocity * 0.75f
-                                        ).coerceIn(-0.2f, 0.2f)
+                                    val indicatorLayerTransform = resolveBottomBarIndicatorLayerTransform(
+                                        motionProgress = motionProgress,
+                                        velocityItemsPerSecond = dragState.deformationVelocityItemsPerSecond,
+                                        isDragging = dragState.isDragging,
+                                        dragScaleProgress = indicatorLayerScaleProgress,
+                                        motionSpec = motionSpec
                                     )
-                                    scaleY = indicatorScale * (
-                                        1f - (
-                                            velocity * 0.25f
-                                        ).coerceIn(-0.2f, 0.2f)
-                                    )
+                                    scaleX = indicatorLayerTransform.scaleX
+                                    scaleY = indicatorLayerTransform.scaleY
                                 }
                             },
                             onDrawSurface = {
@@ -487,7 +688,7 @@ fun BottomBarLiquidSegmentedControl(
             enabled = enabled,
             labelFontSize = labelFontSize,
             indicatorCorner = indicatorCorner,
-            onSelected = onSelected,
+            onSelected = ::selectFromTap,
             interactive = true,
             onPressChanged = dragState::setPressed,
             modifier = Modifier
@@ -516,7 +717,7 @@ private fun AndroidNativeUnderlinedSegmentedControl(
     val safeSelectedIndex = selectedIndex.coerceIn(0, itemCount - 1)
     val selectedTextColor = MaterialTheme.colorScheme.primary
     val unselectedTextColor = MaterialTheme.colorScheme.onSurface.copy(alpha = if (enabled) 0.78f else 0.42f)
-    val underlineShape = RoundedCornerShape(2.dp)
+    val underlineShape = CircleShape
 
     SideEffect {
         onIndicatorPositionChanged?.invoke(safeSelectedIndex.toFloat())
